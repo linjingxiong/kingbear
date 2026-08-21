@@ -1,0 +1,18 @@
+{
+  "name": "kingbear-toy-saas",
+  "private": true,
+  "version": "0.1.0",
+  "description": "玩具加工管理系统 - monorepo root",
+  "scripts": {
+    "postinstall": "pnpm run build:shared",
+    "build:shared": "pnpm --filter @kingbear/shared build",
+    "dev:web": "pnpm --filter @kingbear/web dev",
+    "dev:server": "pnpm --filter @kingbear/server start:dev",
+    "build:web": "pnpm --filter @kingbear/web build",
+    "build:server": "pnpm --filter @kingbear/server build",
+    "build": "pnpm run build:shared && pnpm --filter @kingbear/server build && pnpm --filter @kingbear/web build"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
