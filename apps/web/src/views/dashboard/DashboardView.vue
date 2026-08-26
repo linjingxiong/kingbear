@@ -21,43 +21,45 @@ onMounted(load);
 <template>
   <div v-loading="loading" class="dashboard">
     <template v-if="overview">
+      <!-- 手机上（:xs）两张卡片各占一整行，不再硬挤在一行里；卡片内部的小格子也是
+           手机上两个一排（:xs="12"），桌面照旧一排排开 -->
       <el-row :gutter="16">
-        <el-col :span="12">
+        <el-col :xs="24" :sm="12">
           <el-card>
             <template #header>今日数据</template>
             <el-row :gutter="12">
-              <el-col :span="8">
+              <el-col :xs="12" :sm="8">
                 <div class="stat-label">今日入库单数量</div>
                 <div class="stat-value">{{ overview.today.inboundCount }}</div>
               </el-col>
-              <el-col :span="8">
+              <el-col :xs="12" :sm="8">
                 <div class="stat-label">今日加工数量</div>
                 <div class="stat-value">{{ overview.today.processedQty }}</div>
               </el-col>
-              <el-col :span="8">
+              <el-col :xs="12" :sm="8">
                 <div class="stat-label">今日加工金额</div>
                 <div class="stat-value">¥{{ overview.today.processedAmount.toFixed(2) }}</div>
               </el-col>
             </el-row>
           </el-card>
         </el-col>
-        <el-col :span="12">
+        <el-col :xs="24" :sm="12">
           <el-card>
             <template #header>本月数据</template>
             <el-row :gutter="12">
-              <el-col :span="6">
+              <el-col :xs="12" :sm="6">
                 <div class="stat-label">本月加工金额</div>
                 <div class="stat-value">¥{{ overview.month.processedAmount.toFixed(2) }}</div>
               </el-col>
-              <el-col :span="6">
+              <el-col :xs="12" :sm="6">
                 <div class="stat-label">本月入库次数</div>
                 <div class="stat-value">{{ overview.month.inboundCount }}</div>
               </el-col>
-              <el-col :span="6">
+              <el-col :xs="12" :sm="6">
                 <div class="stat-label">本月加工数量</div>
                 <div class="stat-value">{{ overview.month.processedQty }}</div>
               </el-col>
-              <el-col :span="6">
+              <el-col :xs="12" :sm="6">
                 <div class="stat-label">未收款金额</div>
                 <div class="stat-value warn">¥{{ overview.month.unpaidAmount.toFixed(2) }}</div>
               </el-col>
@@ -67,7 +69,7 @@ onMounted(load);
       </el-row>
 
       <el-row :gutter="16" style="margin-top: 16px">
-        <el-col :span="14">
+        <el-col :xs="24" :sm="14">
           <el-card>
             <template #header>玩具厂排行（本月加工金额）</template>
             <el-table :data="overview.ranking" size="default">
@@ -80,7 +82,7 @@ onMounted(load);
             <el-empty v-if="!overview.ranking.length" description="本月暂无数据" />
           </el-card>
         </el-col>
-        <el-col :span="10">
+        <el-col :xs="24" :sm="10">
           <el-card>
             <template #header>待处理提醒</template>
             <div class="alert-row">
@@ -155,5 +157,14 @@ onMounted(load);
 
 .alert-row:last-child {
   border-bottom: none;
+}
+
+/* 手机上卡片从并排改成上下堆叠时，el-row 的 gutter 只管左右间距，
+   这里手动给堆叠后的卡片补一个下边距，不然会贴在一起；多出来的最后一点
+   间距不影响观感，比精确清除"最后一个"简单可靠 */
+@media (max-width: 767px) {
+  .dashboard :deep(.el-col) {
+    margin-bottom: 16px;
+  }
 }
 </style>
