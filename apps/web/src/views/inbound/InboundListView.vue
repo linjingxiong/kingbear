@@ -139,17 +139,7 @@ onMounted(async () => {
 
 <template>
   <div>
-    <!-- 原来是一大块拖拽上传区域，太占地方，改成一个小按钮 -->
-    <div class="upload-bar">
-      <el-upload :show-file-list="false" accept="image/*" :http-request="customUpload" :disabled="uploading">
-        <el-button type="primary" :loading="uploading">
-          <el-icon><Plus /></el-icon>
-          导入入库单图片
-        </el-button>
-      </el-upload>
-    </div>
-
-    <!-- 查询条件和列表原来是两张卡片，合并成一张，看着是一个整体 -->
+    <!-- 查询条件、导入按钮、列表原来是分开的，现在合并成一张卡片 -->
     <el-card>
       <el-form :model="query" inline class="search-form">
         <el-form-item label="玩具厂">
@@ -167,6 +157,14 @@ onMounted(async () => {
           <el-select v-model="query.sku" clearable filterable placeholder="全部" style="width: 140px" @change="handleSearch">
             <el-option v-for="p in products" :key="p.sku" :label="`${p.sku} · ${p.name}`" :value="p.sku" />
           </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-upload :show-file-list="false" accept="image/*" :http-request="customUpload" :disabled="uploading">
+            <el-button type="primary" :loading="uploading">
+              <el-icon><Plus /></el-icon>
+              导入入库单图片
+            </el-button>
+          </el-upload>
         </el-form-item>
       </el-form>
 
@@ -236,10 +234,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.upload-bar {
-  margin-bottom: 16px;
-}
-
 .search-form {
   margin-bottom: 12px;
 }
