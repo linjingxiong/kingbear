@@ -6,8 +6,10 @@ WORKDIR /repo
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY packages/shared/package.json packages/shared/package.json
+# --ignore-scripts：见 apps/server/Dockerfile 里的同款注释——这一步源码还没拷进来，
+# 根 package.json 的 postinstall（build:shared）跑不了，shared 构建放到 build 阶段显式跑
 COPY apps/web/package.json apps/web/package.json
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 FROM deps AS build
 COPY packages/shared packages/shared
