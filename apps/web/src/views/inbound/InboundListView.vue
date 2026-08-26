@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
+import dayjs from "dayjs";
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from "element-plus";
 import {
   calculateQuantity,
@@ -9,26 +10,29 @@ import {
   type FactoryListItem,
   type InboundItem,
   type InboundRecord,
+  type Product,
   type SearchInboundQuery,
 } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
+import { listProductsByFactory } from "../../api/product";
 import { deleteInbound, searchInbound, uploadInboundImage } from "../../api/inbound";
 
 const router = useRouter();
 
 const factories = ref<FactoryListItem[]>([]);
+const products = ref<Product[]>([]); // 当前选中玩具厂下的产品，给"货号"下拉框用
 const list = ref<InboundRecord[]>([]);
 const total = ref(0);
 const loading = ref(false);
 const uploading = ref(false);
 
-const query = reactive<SearchInboundQuery>({
+// 货号（sku）不带 code（入库单号，已去掉这个筛选项）
+const query = reactive<Omit<SearchInboundQuery, "code">>({
   factoryId: undefined,
-  dateFrom: undefined,
-  dateTo: undefined,
+  dateFrom: dayjs().startOf("month").format("YYYY-MM-DD"),
+  dateTo: dayjs().endOf("month").format("YYYY-MM-DD"),
   productName: undefined,
   sku: undefined,
-  code: undefined,
   page: 1,
   pageSize: 20,
 });
@@ -41,6 +45,21 @@ const statusMeta: Record<InboundStatus, { text: string; type: "info" | "warning"
 
 async function loadFactories() {
   factories.value = await listFactories();
+  if (!query.factoryId && factories.value.length) {
+    // 默认优先选"美奇"，列表里没有的话再退回选第一个
+    const preferred = factories.value.find((f) => f.name === "美奇");
+    query.factoryId = (preferred ?? factories.value[0]).id;
+  }
+}
+
+async function loadProducts() {
+  products.value = query.factoryId ? await listProductsByFactory(query.factoryId) : [];
+}
+
+async function onFactoryChange() {
+  query.sku = undefined; // 换了玩具厂，原来选的货号可能不属于新厂，清掉避免选中一个看不见的值
+  await loadProducts();
+  handleSearch();
 }
 
 async function load() {
@@ -56,19 +75,6 @@ async function load() {
 
 function handleSearch() {
   query.page = 1;
-  load();
-}
-
-function handleReset() {
-  Object.assign(query, {
-    factoryId: undefined,
-    dateFrom: undefined,
-    dateTo: undefined,
-    productName: undefined,
-    sku: undefined,
-    code: undefined,
-    page: 1,
-  });
   load();
 }
 
@@ -109,26 +115,18 @@ function isBigQtyDiff(item: InboundItem) {
 interface FlatRow {
   record: InboundRecord;
   item: InboundItem | null;
-  isFirst: boolean;
-  groupSize: number;
 }
 
 /**
  * 一单里好几个货号原来是挤在同一行的"加工数量"格子里用换行区分，看着像一条数据、
- * 其实是好几条挤在一起。这里按货号拆成一行一行的真实表格行，玩具厂/入库日期/状态/
- * 加工金额/操作这些整单共用的信息用 span-method 纵向合并，视觉上还是"一单一块"，
- * 但每个货号自己占一整行，看着清楚、以后要点开某一行对应的货号也更直观。
+ * 其实是好几条挤在一起。这里按货号拆成一行一行独立的表格行（不合并单元格，玩具厂/
+ * 入库日期这些信息每行都各自完整显示）——一条数据就是一行，跟别的列表页一致。
  * 没有货号明细的单据（识别中/待确认，items 还是空的）也给一行占位，不会凭空消失。
  */
 const flatRows = computed<FlatRow[]>(() =>
   list.value.flatMap((record) => {
     const items = record.items.length ? record.items : [null];
-    return items.map((item, idx) => ({
-      record,
-      item,
-      isFirst: idx === 0,
-      groupSize: items.length,
-    }));
+    return items.map((item) => ({ record, item }));
   }),
 );
 
@@ -137,16 +135,9 @@ function rowClassName({ row }: { row: FlatRow }) {
   return row.item && isBigQtyDiff(row.item) ? "qty-diff-row" : "";
 }
 
-// 玩具厂/入库日期/状态/加工金额/操作这几列合并：同一单的第一行显示、占满 groupSize 行，
-// 其余行这几列直接不渲染（rowspan/colspan 给 0）
-const MERGED_COLUMN_INDEXES = [0, 1, 2, 5, 6];
-function spanMethod({ row, columnIndex }: { row: FlatRow; columnIndex: number }) {
-  if (!MERGED_COLUMN_INDEXES.includes(columnIndex)) return { rowspan: 1, colspan: 1 };
-  return row.isFirst ? { rowspan: row.groupSize, colspan: 1 } : { rowspan: 0, colspan: 0 };
-}
-
-onMounted(() => {
-  loadFactories();
+onMounted(async () => {
+  await loadFactories();
+  await loadProducts();
   load();
 });
 </script>
@@ -171,34 +162,29 @@ onMounted(() => {
     <el-card class="search-card">
       <el-form :model="query" inline>
         <el-form-item label="玩具厂">
-          <el-select v-model="query.factoryId" clearable placeholder="全部" style="width: 180px">
+          <el-select v-model="query.factoryId" clearable placeholder="全部" style="width: 180px" @change="onFactoryChange">
             <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="日期">
-          <el-date-picker v-model="query.dateFrom" type="date" placeholder="起" value-format="YYYY-MM-DD" style="width: 140px" />
+          <el-date-picker v-model="query.dateFrom" type="date" placeholder="起" value-format="YYYY-MM-DD" style="width: 140px" @change="handleSearch" />
         </el-form-item>
         <el-form-item label="至">
-          <el-date-picker v-model="query.dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" />
+          <el-date-picker v-model="query.dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" @change="handleSearch" />
         </el-form-item>
         <el-form-item label="产品名称">
-          <el-input v-model="query.productName" clearable style="width: 140px" />
+          <el-input v-model="query.productName" clearable style="width: 140px" @change="handleSearch" />
         </el-form-item>
         <el-form-item label="货号">
-          <el-input v-model="query.sku" clearable style="width: 120px" />
-        </el-form-item>
-        <el-form-item label="入库单号">
-          <el-input v-model="query.code" clearable style="width: 160px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">搜索</el-button>
-          <el-button @click="handleReset">重置</el-button>
+          <el-select v-model="query.sku" clearable filterable placeholder="全部" style="width: 140px" @change="handleSearch">
+            <el-option v-for="p in products" :key="p.sku" :label="`${p.sku} · ${p.name}`" :value="p.sku" />
+          </el-select>
         </el-form-item>
       </el-form>
     </el-card>
 
     <el-card>
-      <el-table v-loading="loading" :data="flatRows" border :row-class-name="rowClassName" :span-method="spanMethod">
+      <el-table v-loading="loading" :data="flatRows" border :row-class-name="rowClassName">
         <el-table-column label="玩具厂" width="160">
           <template #default="{ row }: { row: FlatRow }">
             {{ factories.find((f) => f.id === row.record.factoryId)?.name ?? (row.record.needFactorySelect ? "待选择" : "-") }}
