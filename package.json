@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "玩具加工管理系统 - monorepo root",
+  "packageManager": "pnpm@10.5.0",
   "scripts": {
     "postinstall": "pnpm run build:shared",
     "build:shared": "pnpm --filter @kingbear/shared build",
