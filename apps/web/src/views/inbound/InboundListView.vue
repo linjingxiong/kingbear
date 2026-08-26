@@ -26,12 +26,11 @@ const total = ref(0);
 const loading = ref(false);
 const uploading = ref(false);
 
-// 货号（sku）不带 code（入库单号，已去掉这个筛选项）
-const query = reactive<Omit<SearchInboundQuery, "code">>({
+// 不带 code（入库单号）和 productName（产品名称），这两个筛选项已经去掉了
+const query = reactive<Omit<SearchInboundQuery, "code" | "productName">>({
   factoryId: undefined,
   dateFrom: dayjs().startOf("month").format("YYYY-MM-DD"),
   dateTo: dayjs().endOf("month").format("YYYY-MM-DD"),
-  productName: undefined,
   sku: undefined,
   page: 1,
   pageSize: 20,
@@ -167,9 +166,6 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="至">
           <el-date-picker v-model="query.dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" @change="handleSearch" />
-        </el-form-item>
-        <el-form-item label="产品名称">
-          <el-input v-model="query.productName" clearable style="width: 140px" @change="handleSearch" />
         </el-form-item>
         <el-form-item label="货号">
           <el-select v-model="query.sku" clearable filterable placeholder="全部" style="width: 140px" @change="handleSearch">
