@@ -133,7 +133,12 @@ interface FlatRow {
 const flatRows = computed<FlatRow[]>(() =>
   list.value.flatMap((record) => {
     const items = record.items.length ? record.items : [null];
-    return items.map((item) => ({ record, item }));
+    return items
+      .map((item) => ({ record, item }))
+      // 后端按货号筛选是"这单里只要有一行是这个货号就整单返回"（数组字段的匹配方式），
+      // 不是"只返回这一行"——这里再按选中的货号把同一单里其它不相关的货号过滤掉，
+      // 不然筛货号 001 出来的表格里还会看到这一单其它货号（350/351）的行，看着就像筛错了
+      .filter((row) => !query.sku || row.item?.sku === query.sku);
   }),
 );
 
