@@ -104,6 +104,24 @@ export class InboundService {
     return record;
   }
 
+  /**
+   * 手工录入：不走 OCR，直接建一条空记录（没有图片），跳到跟识别单据一样的确认页去填。
+   * 复用同一个确认页/同一套 confirm 接口，人工录入和识别出来的单据最后走的是同一条路。
+   */
+  async createManual() {
+    const code = await this.generateCode();
+    return this.inboundModel.create({
+      code,
+      factoryId: null,
+      needFactorySelect: true,
+      inboundDate: new Date(),
+      imageUrl: '',
+      ocrRawResult: null,
+      status: InboundStatus.PendingConfirm,
+      items: [],
+    });
+  }
+
   /** 人工确认页提交：重新计算每行金额，状态流转到 completed */
   async confirm(id: string, dto: ConfirmInboundDto) {
     const record = await this.getOrThrow(id);

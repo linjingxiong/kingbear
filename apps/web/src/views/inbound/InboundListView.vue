@@ -15,7 +15,7 @@ import {
 } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { listProductsByFactory } from "../../api/product";
-import { deleteInbound, searchInbound, uploadInboundImage } from "../../api/inbound";
+import { createManualInbound, deleteInbound, searchInbound, uploadInboundImage } from "../../api/inbound";
 
 const router = useRouter();
 
@@ -85,6 +85,18 @@ async function customUpload(options: UploadRequestOptions) {
     router.push(`/inbound/${record.id}/confirm`);
   } finally {
     uploading.value = false;
+  }
+}
+
+const manualCreating = ref(false);
+
+async function handleManualCreate() {
+  manualCreating.value = true;
+  try {
+    const record = await createManualInbound();
+    router.push(`/inbound/${record.id}/confirm`);
+  } finally {
+    manualCreating.value = false;
   }
 }
 
@@ -165,6 +177,14 @@ onMounted(async () => {
               导入入库单图片
             </el-button>
           </el-upload>
+        </el-form-item>
+        <el-form-item>
+          <!-- 不走 OCR，直接建一条空记录跳到确认页——跟识别出来的单据是同一个确认页，
+               只是没有图片可看，字段全靠手动填 -->
+          <el-button :loading="manualCreating" @click="handleManualCreate">
+            <el-icon><EditPen /></el-icon>
+            手工录入
+          </el-button>
         </el-form-item>
       </el-form>
 

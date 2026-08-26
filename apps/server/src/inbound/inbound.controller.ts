@@ -38,6 +38,11 @@ export class InboundController {
     return this.inboundService.createFromUpload(imageUrl, file.path);
   }
 
+  @Post('manual')
+  createManual() {
+    return this.inboundService.createManual();
+  }
+
   @Post(':id/confirm')
   confirm(@Param('id') id: string, @Body() dto: ConfirmInboundDto) {
     return this.inboundService.confirm(id, dto);

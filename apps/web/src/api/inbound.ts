@@ -9,6 +9,11 @@ export function uploadInboundImage(file: File) {
   });
 }
 
+/** 手工录入：不上传图片，直接建一条空记录，跳到确认页手动填 */
+export function createManualInbound() {
+  return request.post<never, InboundRecord>("/inbound/manual");
+}
+
 export function confirmInbound(id: string, dto: ConfirmInboundDto) {
   return request.post<never, InboundRecord>(`/inbound/${id}/confirm`, dto);
 }

@@ -67,7 +67,8 @@ export class InboundRecord extends Document {
   @Prop({ required: true, index: true })
   inboundDate: Date;
 
-  @Prop({ required: true })
+  // 手工录入（没有上传单据图片）的记录留空字符串，前端确认页据此不显示图片区域
+  @Prop({ default: '' })
   imageUrl: string;
 
   /** 图片展示旋转角度：0/90/180/270。只是显示时转一下，原图文件从不改动，不会有画质损失 */

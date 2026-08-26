@@ -452,7 +452,8 @@ onMounted(load);
           </div>
       </el-card>
 
-      <div v-if="record" class="image-panel">
+      <!-- 手工录入的记录没有单据图片（imageUrl 是空字符串），这块整个不显示 -->
+      <div v-if="record && record.imageUrl" class="image-panel">
         <div
           class="image-frame"
           :class="{
