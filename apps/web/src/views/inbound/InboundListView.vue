@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from "element-plus";
 import {
@@ -106,10 +106,43 @@ function isBigQtyDiff(item: InboundItem) {
   return hasBigQuantityDiff(item.qtyFinal, calculateQuantity(item.weightJin, item.unitWeightG));
 }
 
-// 小图标太不显眼，容易被忽略——只要这一单里有任意一个货号数量差异较大，整行都高亮，
-// 一眼扫过去就能看出这单有问题，不用凑近了一个个找感叹号
-function rowClassName({ row }: { row: InboundRecord }) {
-  return row.items.some(isBigQtyDiff) ? "qty-diff-row" : "";
+interface FlatRow {
+  record: InboundRecord;
+  item: InboundItem | null;
+  isFirst: boolean;
+  groupSize: number;
+}
+
+/**
+ * 一单里好几个货号原来是挤在同一行的"加工数量"格子里用换行区分，看着像一条数据、
+ * 其实是好几条挤在一起。这里按货号拆成一行一行的真实表格行，玩具厂/入库日期/状态/
+ * 加工金额/操作这些整单共用的信息用 span-method 纵向合并，视觉上还是"一单一块"，
+ * 但每个货号自己占一整行，看着清楚、以后要点开某一行对应的货号也更直观。
+ * 没有货号明细的单据（识别中/待确认，items 还是空的）也给一行占位，不会凭空消失。
+ */
+const flatRows = computed<FlatRow[]>(() =>
+  list.value.flatMap((record) => {
+    const items = record.items.length ? record.items : [null];
+    return items.map((item, idx) => ({
+      record,
+      item,
+      isFirst: idx === 0,
+      groupSize: items.length,
+    }));
+  }),
+);
+
+// 只标这一个货号自己那一行，不再把整单一起高亮——现在一个货号就是一行，精确到行了
+function rowClassName({ row }: { row: FlatRow }) {
+  return row.item && isBigQtyDiff(row.item) ? "qty-diff-row" : "";
+}
+
+// 玩具厂/入库日期/状态/加工金额/操作这几列合并：同一单的第一行显示、占满 groupSize 行，
+// 其余行这几列直接不渲染（rowspan/colspan 给 0）
+const MERGED_COLUMN_INDEXES = [0, 1, 2, 5, 6];
+function spanMethod({ row, columnIndex }: { row: FlatRow; columnIndex: number }) {
+  if (!MERGED_COLUMN_INDEXES.includes(columnIndex)) return { rowspan: 1, colspan: 1 };
+  return row.isFirst ? { rowspan: row.groupSize, colspan: 1 } : { rowspan: 0, colspan: 0 };
 }
 
 onMounted(() => {
@@ -165,46 +198,49 @@ onMounted(() => {
     </el-card>
 
     <el-card>
-      <el-table v-loading="loading" :data="list" border :row-class-name="rowClassName">
+      <el-table v-loading="loading" :data="flatRows" border :row-class-name="rowClassName" :span-method="spanMethod">
         <el-table-column label="玩具厂" width="160">
-          <template #default="{ row }">
-            {{ factories.find((f) => f.id === row.factoryId)?.name ?? (row.needFactorySelect ? "待选择" : "-") }}
+          <template #default="{ row }: { row: FlatRow }">
+            {{ factories.find((f) => f.id === row.record.factoryId)?.name ?? (row.record.needFactorySelect ? "待选择" : "-") }}
           </template>
         </el-table-column>
         <el-table-column label="入库日期" width="120">
-          <template #default="{ row }">{{ row.inboundDate?.slice(0, 10) }}</template>
+          <template #default="{ row }: { row: FlatRow }">{{ row.record.inboundDate?.slice(0, 10) }}</template>
         </el-table-column>
         <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="statusMeta[row.status as InboundStatus].type">
-              {{ statusMeta[row.status as InboundStatus].text }}
+          <template #default="{ row }: { row: FlatRow }">
+            <el-tag :type="statusMeta[row.record.status as InboundStatus].type">
+              {{ statusMeta[row.record.status as InboundStatus].text }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="加工数量" width="160">
-          <template #default="{ row }">
-            <!-- 一单可能有好几个不同货号，数量分开列出来，不合成一个总数——不然不同货号
-                 混在一起加总，数字看着大但没什么实际意义 -->
-            <div v-for="item in row.items" :key="item.sku" class="qty-line">
-              {{ item.sku }}：{{ item.qtyFinal }}
+        <!-- 货号数量原来挤在一个格子里用换行区分，现在一个货号一行，是真实的表格行了 -->
+        <el-table-column label="货号" width="100">
+          <template #default="{ row }: { row: FlatRow }">{{ row.item?.sku ?? "-" }}</template>
+        </el-table-column>
+        <el-table-column label="加工数量" width="140">
+          <template #default="{ row }: { row: FlatRow }">
+            <template v-if="row.item">
+              {{ row.item.qtyFinal }}
               <el-tooltip
-                v-if="isBigQtyDiff(item)"
+                v-if="isBigQtyDiff(row.item)"
                 content="跟按重量算出来的数量相差超过 1%，很可能录错了，建议进去核对"
               >
                 <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
               </el-tooltip>
-            </div>
+            </template>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="加工金额" width="120" align="right">
-          <template #default="{ row }">¥{{ itemsAmount(row).toFixed(2) }}</template>
+          <template #default="{ row }: { row: FlatRow }">¥{{ itemsAmount(row.record).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" @click="openRecord(row)">
-              {{ row.status === "completed" ? "查看/修改" : "去确认" }}
+          <template #default="{ row }: { row: FlatRow }">
+            <el-button link type="primary" @click="openRecord(row.record)">
+              {{ row.record.status === "completed" ? "查看/修改" : "去确认" }}
             </el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+            <el-button link type="danger" @click="handleDelete(row.record)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -230,11 +266,6 @@ onMounted(() => {
 .upload-inner {
   padding: 24px;
   color: #909399;
-}
-
-.qty-line {
-  line-height: 1.6;
-  white-space: nowrap;
 }
 
 .qty-diff-icon {
