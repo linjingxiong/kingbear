@@ -200,6 +200,9 @@ onMounted(async () => {
         <el-table-column label="货号" width="100">
           <template #default="{ row }: { row: FlatRow }">{{ row.item?.sku ?? "-" }}</template>
         </el-table-column>
+        <el-table-column label="名称" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }: { row: FlatRow }">{{ row.item?.name ?? "-" }}</template>
+        </el-table-column>
         <el-table-column label="加工数量" width="140">
           <template #default="{ row }: { row: FlatRow }">
             <template v-if="row.item">
