@@ -17,6 +17,14 @@ export interface FactoryRankingItem {
   monthAmount: number;
 }
 
+/** 本月加工数量按货号拆开的一行——不同货号的"个"不是一回事，不能加在一起看 */
+export interface DashboardSkuStat {
+  sku: string;
+  name: string;
+  qty: number;
+  amount: number;
+}
+
 export interface DashboardAlerts {
   pendingConfirmCount: number;
   quantityDiffCount: number;
@@ -28,4 +36,5 @@ export interface DashboardOverview {
   month: DashboardMonthStats;
   ranking: FactoryRankingItem[];
   alerts: DashboardAlerts;
+  monthBySku: DashboardSkuStat[];
 }

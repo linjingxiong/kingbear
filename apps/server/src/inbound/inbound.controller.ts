@@ -15,6 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { InboundService } from './inbound.service';
 import { ConfirmInboundDto } from './dto/confirm-inbound.dto';
 import { SearchInboundDto } from './dto/search-inbound.dto';
+import { RotateImageDto } from './dto/rotate-image.dto';
 import { inboundImageMulterOptions, toPublicUploadUrl } from '../upload/upload.config';
 
 @Controller('inbound')
@@ -45,6 +46,11 @@ export class InboundController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: ConfirmInboundDto) {
     return this.inboundService.update(id, dto);
+  }
+
+  @Post(':id/rotate-image')
+  rotateImage(@Param('id') id: string, @Body() dto: RotateImageDto) {
+    return this.inboundService.rotateImage(id, dto.direction);
   }
 
   @Get()

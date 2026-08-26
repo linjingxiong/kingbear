@@ -22,8 +22,9 @@ export class ProductController {
   }
 
   @Get()
-  findByFactory(@Query('factoryId') factoryId: string) {
-    return this.productService.findByFactory(factoryId);
+  find(@Query('factoryId') factoryId?: string, @Query('sku') sku?: string) {
+    if (sku) return this.productService.findBySku(sku);
+    return this.productService.findByFactory(factoryId!);
   }
 
   @Get(':id')

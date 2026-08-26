@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { InboundRecord, InboundRecordSchema } from '../inbound/schemas/inbound-record.schema';
 import { Factory, FactorySchema } from '../factory/schemas/factory.schema';
+import { Product, ProductSchema } from '../product/schemas/product.schema';
 import { MonthlyBillStatus, MonthlyBillStatusSchema } from './schemas/monthly-bill-status.schema';
 import { BillingService } from './billing.service';
 import { BillingController } from './billing.controller';
@@ -11,6 +12,7 @@ import { BillingController } from './billing.controller';
     MongooseModule.forFeature([
       { name: InboundRecord.name, schema: InboundRecordSchema },
       { name: Factory.name, schema: FactorySchema },
+      { name: Product.name, schema: ProductSchema },
       { name: MonthlyBillStatus.name, schema: MonthlyBillStatusSchema },
     ]),
   ],

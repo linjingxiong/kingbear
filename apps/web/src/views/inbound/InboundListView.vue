@@ -2,7 +2,15 @@
 import { onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from "element-plus";
-import { InboundStatus, type FactoryListItem, type InboundRecord, type SearchInboundQuery } from "@kingbear/shared";
+import {
+  calculateQuantity,
+  hasBigQuantityDiff,
+  InboundStatus,
+  type FactoryListItem,
+  type InboundItem,
+  type InboundRecord,
+  type SearchInboundQuery,
+} from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { deleteInbound, searchInbound, uploadInboundImage } from "../../api/inbound";
 
@@ -88,12 +96,20 @@ async function handleDelete(row: InboundRecord) {
   load();
 }
 
-function itemsQty(row: InboundRecord) {
-  return row.items.reduce((sum, i) => sum + i.qtyFinal, 0);
-}
-
 function itemsAmount(row: InboundRecord) {
   return row.items.reduce((sum, i) => sum + i.amount, 0);
+}
+
+// 不依赖入库确认时存的 hasQuantityDiff 快照，直接拿当前的重量/克重/数量现算一遍——
+// 就算是很早以前录入、当时判断标准还比较松的旧数据，现在打开列表也一样能被拦出来提醒
+function isBigQtyDiff(item: InboundItem) {
+  return hasBigQuantityDiff(item.qtyFinal, calculateQuantity(item.weightJin, item.unitWeightG));
+}
+
+// 小图标太不显眼，容易被忽略——只要这一单里有任意一个货号数量差异较大，整行都高亮，
+// 一眼扫过去就能看出这单有问题，不用凑近了一个个找感叹号
+function rowClassName({ row }: { row: InboundRecord }) {
+  return row.items.some(isBigQtyDiff) ? "qty-diff-row" : "";
 }
 
 onMounted(() => {
@@ -149,8 +165,7 @@ onMounted(() => {
     </el-card>
 
     <el-card>
-      <el-table v-loading="loading" :data="list" border>
-        <el-table-column prop="code" label="入库单号" width="160" />
+      <el-table v-loading="loading" :data="list" border :row-class-name="rowClassName">
         <el-table-column label="玩具厂" width="160">
           <template #default="{ row }">
             {{ factories.find((f) => f.id === row.factoryId)?.name ?? (row.needFactorySelect ? "待选择" : "-") }}
@@ -166,8 +181,20 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="加工数量" width="100" align="right">
-          <template #default="{ row }">{{ itemsQty(row) }}</template>
+        <el-table-column label="加工数量" width="160">
+          <template #default="{ row }">
+            <!-- 一单可能有好几个不同货号，数量分开列出来，不合成一个总数——不然不同货号
+                 混在一起加总，数字看着大但没什么实际意义 -->
+            <div v-for="item in row.items" :key="item.sku" class="qty-line">
+              {{ item.sku }}：{{ item.qtyFinal }}
+              <el-tooltip
+                v-if="isBigQtyDiff(item)"
+                content="跟按重量算出来的数量相差超过 1%，很可能录错了，建议进去核对"
+              >
+                <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
+              </el-tooltip>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="加工金额" width="120" align="right">
           <template #default="{ row }">¥{{ itemsAmount(row).toFixed(2) }}</template>
@@ -203,5 +230,23 @@ onMounted(() => {
 .upload-inner {
   padding: 24px;
   color: #909399;
+}
+
+.qty-line {
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.qty-diff-icon {
+  color: #f56c6c;
+  margin-left: 4px;
+  vertical-align: middle;
+  cursor: help;
+}
+
+/* row-class-name 加到的是 el-table 内部真实的 <tr>，不在这个组件的模板里，
+   scoped 样式默认选不中，要用 :deep() 穿透进去 */
+:deep(.qty-diff-row td) {
+  background-color: #fef0f0;
 }
 </style>

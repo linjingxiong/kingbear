@@ -31,3 +31,8 @@ export function getInbound(id: string) {
 export function deleteInbound(id: string) {
   return request.delete<never, { success: boolean }>(`/inbound/${id}`);
 }
+
+/** 旋转入库单图片：服务端直接把原图文件转正保存，不是前端 CSS 转一下就完事 */
+export function rotateInboundImage(id: string, direction: "left" | "right") {
+  return request.post<never, InboundRecord>(`/inbound/${id}/rotate-image`, { direction });
+}

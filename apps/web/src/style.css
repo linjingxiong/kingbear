@@ -15,3 +15,15 @@ body {
   color: #303133;
   background: #f0f2f5;
 }
+
+/* 全局表格样式：表头带底色区分出来，列名居中，看着更像正经后台系统而不是一张干巴巴的表。
+   放在全局而不是某个页面里，所有 el-table（入库列表、账单、玩具厂/产品管理…）统一生效 */
+.el-table th.el-table__cell {
+  background-color: #eef3fb;
+  color: #1f2d3d;
+  font-weight: 600;
+}
+
+.el-table th.el-table__cell > .cell {
+  text-align: center;
+}

@@ -23,11 +23,12 @@ export class DashboardService {
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const [today, month, ranking, alerts] = await Promise.all([
+    const [today, month, ranking, alerts, monthBySku] = await Promise.all([
       this.aggregateRange(todayStart, todayEnd),
       this.aggregateRange(monthStart, monthEnd),
       this.getFactoryRanking(monthStart, monthEnd),
       this.getAlerts(yearMonth),
+      this.getMonthBySku(monthStart, monthEnd),
     ]);
 
     const unpaidAmount = await this.getUnpaidAmount(yearMonth);
@@ -46,6 +47,7 @@ export class DashboardService {
       },
       ranking,
       alerts,
+      monthBySku,
     };
   }
 
@@ -85,6 +87,29 @@ export class DashboardService {
         factoryName: nameMap.get(String(r._id)) ?? '未知玩具厂',
         monthAmount: r.monthAmount,
       }));
+  }
+
+  /**
+   * "本月加工数量"这个总数不同货号加在一起没有意义（见 billing.service 里同样的原则），
+   * 首页只放一个笼统的数字容易让人误会。这里按货号拆开算，前端展开明细表，
+   * 才是真正能看的"详情"。
+   */
+  private async getMonthBySku(monthStart: Date, monthEnd: Date) {
+    const rows = await this.inboundModel.aggregate([
+      { $match: { status: InboundStatus.Completed, inboundDate: { $gte: monthStart, $lt: monthEnd } } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.sku',
+          name: { $first: '$items.name' },
+          qty: { $sum: '$items.qtyFinal' },
+          amount: { $sum: '$items.amount' },
+        },
+      },
+      { $sort: { amount: -1 } },
+    ]);
+
+    return rows.map((r) => ({ sku: r._id as string, name: r.name as string, qty: r.qty, amount: r.amount }));
   }
 
   private async getAlerts(yearMonth: string) {

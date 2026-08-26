@@ -184,6 +184,28 @@ export class InboundService {
     return { success: true };
   }
 
+  /**
+   * 旋转入库单图片：直接把磁盘上的原图文件旋转后覆写保存，imageUrl 不变。
+   * 这样"旋转之后要保存，下次查看就是旋转之后的"是天然成立的——不是前端 CSS 转一下就完了，
+   * 存的就是转正之后的图。updatedAt 会跟着 save() 自动刷新，前端拿它当版本号给图片 URL 加 query
+   * 做缓存清除用。
+   */
+  /**
+   * 旋转入库单图片：只改一个存在 InboundRecord 上的角度字段（0/90/180/270），原图文件的
+   * 字节从头到尾都不会被碰。之前是拿 Jimp 把整张图解码、转、重新编码存盘，图片是有损格式，
+   * 转的次数一多画质会肉眼可见地劣化；现在只是数据库里一个数字自增/自减，没有图片处理，
+   * 也就没有画质损失这回事，转多少次都一样清晰。
+   *
+   * 显示的时候前端拿这个角度值给 <img> 套一个 CSS rotate() 就行，见 InboundConfirmView.vue。
+   */
+  async rotateImage(id: string, direction: 'left' | 'right') {
+    const record = await this.getOrThrow(id);
+    const delta = direction === 'right' ? 90 : -90;
+    record.rotation = ((record.rotation + delta) % 360 + 360) % 360;
+    await record.save();
+    return record;
+  }
+
   private async getOrThrow(id: string) {
     const record = await this.inboundModel.findById(id);
     if (!record) throw new NotFoundException('入库单不存在');

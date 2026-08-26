@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import dayjs from "dayjs";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { BillPaymentStatus, type BillingSummary, type FactoryListItem } from "@kingbear/shared";
+import {
+  BillPaymentStatus,
+  calculateQuantity,
+  hasBigQuantityDiff,
+  type BillingDetailRow,
+  type BillingSummary,
+  type FactoryListItem,
+} from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { getBillingSummary, updatePaymentStatus } from "../../api/billing";
 
@@ -12,9 +19,37 @@ const yearMonth = ref<string>(dayjs().format("YYYY-MM"));
 const summary = ref<BillingSummary | null>(null);
 const loading = ref(false);
 
+/** 下面按货号切换的 tab；空字符串是"全部"这个 tab */
+const skuFilter = ref("");
+
+/** 账期下拉：最近 12 个月，不用日期选择器那一套 */
+const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
+
+/** 左边明细表跟着 tab 联动——选了具体货号就只看这个货号的流水，"全部"就是全部流水 */
+const filteredDetails = computed(() => {
+  if (!summary.value) return [];
+  if (!skuFilter.value) return summary.value.details;
+  return summary.value.details.filter((d) => d.sku === skuFilter.value);
+});
+
 async function loadFactories() {
   factories.value = await listFactories();
-  if (!factoryId.value && factories.value.length) factoryId.value = factories.value[0].id;
+  if (!factoryId.value && factories.value.length) {
+    // 默认优先选"美奇"，列表里没有的话（比如换了环境）再退回选第一个，不会白屏选不出来
+    const preferred = factories.value.find((f) => f.name === "美奇");
+    factoryId.value = (preferred ?? factories.value[0]).id;
+  }
+}
+
+// 跟入库确认页、入库管理列表用同一份"相差超过 1% 算异常"的标准，账单上金额算得再准，
+// 源头数量本身就录错的话也要能看出来
+function isBigQtyDiff(row: BillingDetailRow) {
+  return hasBigQuantityDiff(row.qty, calculateQuantity(row.weightJin, row.unitWeightG));
+}
+
+// 小图标不够显眼，数量差异较大的这一整行都高亮，一眼就能扫到
+function rowClassName({ row }: { row: BillingDetailRow }) {
+  return isBigQtyDiff(row) ? "qty-diff-row" : "";
 }
 
 async function handleQuery() {
@@ -23,6 +58,7 @@ async function handleQuery() {
     return;
   }
   loading.value = true;
+  skuFilter.value = "";
   try {
     summary.value = await getBillingSummary(factoryId.value, yearMonth.value);
   } finally {
@@ -54,65 +90,293 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div>
-    <el-card class="query-card">
-      <el-form inline>
-        <el-form-item label="玩具厂">
-          <el-select v-model="factoryId" style="width: 200px">
-            <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="月份">
-          <el-date-picker v-model="yearMonth" type="month" value-format="YYYY-MM" style="width: 160px" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="handleQuery">查询</el-button>
-        </el-form-item>
-      </el-form>
+  <div class="billing-page">
+    <!-- 玩具厂/账期的筛选查询直接放进对账单卡片里，不用再拆一张单独的卡片；
+         这块不依赖 summary，选完就能点查询，不会因为还没查出结果就先被隐藏掉 -->
+    <el-card class="statement-card">
+      <div class="statement-title">
+        <h2>应收对账单</h2>
+        <div v-if="summary" class="statement-actions">
+          <el-tag :type="summary.status === 'paid' ? 'success' : 'warning'" size="large">
+            {{ summary.status === "paid" ? "已收款" : "未收款" }}
+          </el-tag>
+          <el-button link type="primary" @click="togglePaymentStatus">
+            标记为{{ summary.status === "paid" ? "未收款" : "已收款" }}
+          </el-button>
+        </div>
+      </div>
+
+      <div class="statement-meta">
+        <el-form inline class="meta-form">
+          <el-form-item label="玩具厂">
+            <el-select v-model="factoryId" style="width: 200px" @change="handleQuery">
+              <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="账期">
+            <el-select v-model="yearMonth" style="width: 160px" @change="handleQuery">
+              <el-option v-for="m in monthOptions" :key="m" :label="m" :value="m" />
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <template v-if="summary">
+        <template v-if="summary.bySku.length">
+          <!-- 应收汇总在左，明细流水在右，横向并排；应收汇总永远是这个玩具厂这个月的全部应收，
+               不随右边的 tab 切换变化——不管在看哪个货号的流水，应收合计都是同一个数 -->
+          <div class="statement-row">
+            <div class="statement-summary">
+              <table class="summary-table">
+                <thead>
+                  <tr>
+                    <th>货号</th>
+                    <th>名称</th>
+                    <th class="num">出货数量</th>
+                    <th class="num">金额</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="s in summary.bySku" :key="s.sku">
+                    <td>{{ s.sku }}</td>
+                    <td>{{ s.name }}</td>
+                    <td class="num">{{ s.qty.toLocaleString() }}</td>
+                    <td class="num">¥{{ s.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</td>
+                  </tr>
+                </tbody>
+                <tfoot>
+                  <tr class="grand-total">
+                    <td colspan="2">应收合计</td>
+                    <td class="num">—</td>
+                    <td class="num">¥{{ summary.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div class="statement-detail-wrap">
+              <!-- 按货号切换的 tab，点哪个货号下面明细表就只显示那一行的流水；"全部"tab 显示完整月度流水 -->
+              <el-tabs v-model="skuFilter" class="sku-tabs">
+                <el-tab-pane label="全部" name="" />
+                <el-tab-pane v-for="s in summary.bySku" :key="s.sku" :label="`${s.sku} · ${s.name}`" :name="s.sku" />
+              </el-tabs>
+
+              <div class="statement-detail">
+                <el-table :data="filteredDetails" border size="small" height="100%" :row-class-name="rowClassName">
+                  <el-table-column prop="date" label="日期" width="110" />
+                  <el-table-column prop="sku" label="货号" width="90" />
+                  <!-- 名称固定宽度，太长就省略号+悬浮提示，不然名字一长整列被撑得很宽 -->
+                  <el-table-column prop="name" label="名称" width="140" show-overflow-tooltip />
+                  <el-table-column label="重量(斤)" width="90" align="right">
+                    <template #default="{ row }">{{ row.weightJin }}</template>
+                  </el-table-column>
+                  <el-table-column label="单个克重(g)" width="110" align="right">
+                    <template #default="{ row }">{{ row.unitWeightG }}</template>
+                  </el-table-column>
+                  <el-table-column label="出货数量" width="130" align="right">
+                    <template #default="{ row }">
+                      {{ row.qty.toLocaleString() }}
+                      <el-tooltip
+                        v-if="isBigQtyDiff(row)"
+                        content="跟按重量算出来的数量相差超过 1%，很可能录错了，建议核对"
+                      >
+                        <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
+                      </el-tooltip>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="工厂价" width="90" align="right">
+                    <template #default="{ row }">{{ row.factoryPrice.toFixed(4) }}</template>
+                  </el-table-column>
+                  <el-table-column label="金额" width="100" align="right">
+                    <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
+                  </el-table-column>
+                  <el-table-column label="附件" width="70" align="center">
+                    <template #default="{ row }">
+                      <el-image
+                        :src="row.imageUrl"
+                        :preview-src-list="[row.imageUrl]"
+                        preview-teleported
+                        fit="cover"
+                        class="detail-thumb"
+                        :style="{ transform: `rotate(${row.rotation}deg)` }"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-empty v-if="!filteredDetails.length" description="暂无流水" />
+              </div>
+            </div>
+          </div>
+        </template>
+        <el-empty v-else description="该月暂无入库记录" />
+      </template>
     </el-card>
-
-    <template v-if="summary">
-      <el-card class="summary-card">
-        <el-descriptions :column="4" border>
-          <el-descriptions-item label="玩具厂">{{ summary.factoryName }}</el-descriptions-item>
-          <el-descriptions-item label="时间">{{ summary.yearMonth }}</el-descriptions-item>
-          <el-descriptions-item label="入库次数">{{ summary.inboundCount }}</el-descriptions-item>
-          <el-descriptions-item label="加工数量">{{ summary.totalQty }}</el-descriptions-item>
-          <el-descriptions-item label="加工金额">¥{{ summary.totalAmount.toFixed(2) }}</el-descriptions-item>
-          <el-descriptions-item label="状态" :span="2">
-            <el-tag :type="summary.status === 'paid' ? 'success' : 'warning'">
-              {{ summary.status === "paid" ? "已收款" : "未收款" }}
-            </el-tag>
-            <el-button link type="primary" style="margin-left: 12px" @click="togglePaymentStatus">
-              标记为{{ summary.status === "paid" ? "未收款" : "已收款" }}
-            </el-button>
-          </el-descriptions-item>
-        </el-descriptions>
-      </el-card>
-
-      <el-card>
-        <template #header>明细</template>
-        <el-table :data="summary.details" border size="small">
-          <el-table-column prop="date" label="日期" width="120" />
-          <el-table-column prop="sku" label="货号" width="140" />
-          <el-table-column prop="name" label="名称" />
-          <el-table-column prop="qty" label="数量" width="100" align="right" />
-          <el-table-column label="工厂价" width="100" align="right">
-            <template #default="{ row }">{{ row.factoryPrice.toFixed(2) }}</template>
-          </el-table-column>
-          <el-table-column label="金额" width="110" align="right">
-            <template #default="{ row }">¥{{ row.amount.toFixed(2) }}</template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!summary.details.length" description="该月暂无入库记录" />
-      </el-card>
-    </template>
   </div>
 </template>
 
 <style scoped>
-.query-card,
-.summary-card {
+/* 让卡片一路撑到浏览器可视区域底部，而不是内容多高页面就多高、下面剩一大截空白。
+   .main（BasicLayout 里滚动的那个容器）本身已经是撑满视口剩余高度的，这里只要
+   让这个页面的根节点和卡片跟着一路 height:100% / flex:1 传下去就行 */
+.billing-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.statement-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.statement-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 汇总信息、明细表、合计放进同一张卡片里，看着就是一张完整的对账单，
+   不是拆成好几块互不相干的卡片 */
+.statement-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 16px;
   margin-bottom: 16px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.statement-title h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.statement-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.statement-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  margin-bottom: 20px;
+  font-size: 15px;
+}
+
+.meta-label {
+  color: #909399;
+  font-size: 13px;
+  margin-right: 6px;
+}
+
+.meta-highlight {
+  font-weight: 600;
+  color: #e6a23c;
+}
+
+/* 应收合计在左，明细流水在右，横向并排；应收合计这块宽度只随内容走，不随明细表被拉宽，
+   但高度要跟右边一样高（align-items: stretch），不能矮一截 */
+.statement-row {
+  display: flex;
+  align-items: stretch;
+  gap: 24px;
+  margin-top: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 应收合计只随内容撑高度就行，不跟着右边明细表一起被拉满——align-self: flex-start
+   跳出 .statement-row 的 stretch，自己顶部对齐、多高算多高 */
+.statement-summary {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: fit-content;
+  background: #fff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  box-sizing: border-box;
+}
+
+/* 明细这一侧（tab + 表格）占满剩下的宽度，同时纵向也是 tab 固定、表格吃掉剩下的高度 */
+.statement-detail-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sku-tabs {
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
+/* el-table 绑了 height="100%"，靠这个容器有确定高度撑满剩余空间，多出来的行自己滚动 */
+.statement-detail {
+  margin-top: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 按货号分开的汇总小表，做成正式单据常见的那种简洁线条风格（不是 el-table 那套），
+   跟上面的明细表拉开层次，一眼看出这是"总结"不是"流水"；右对齐、不铺满整行 */
+.summary-table {
+  width: 100%;
+  max-width: 560px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.summary-table th,
+.summary-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.summary-table th {
+  color: #909399;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.summary-table td.num,
+.summary-table th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-table tfoot .grand-total td {
+  border-bottom: none;
+  border-top: 2px solid #303133;
+  font-weight: 700;
+  font-size: 16px;
+  color: #e6a23c;
+}
+
+.detail-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  cursor: zoom-in;
+  vertical-align: middle;
+}
+
+.qty-diff-icon {
+  color: #f56c6c;
+  margin-left: 2px;
+  vertical-align: middle;
+  cursor: help;
+}
+
+/* row-class-name 加到的是 el-table 内部真实的 <tr>，scoped 样式要用 :deep() 穿透进去 */
+:deep(.qty-diff-row td) {
+  background-color: #fef0f0;
 }
 </style>

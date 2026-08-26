@@ -11,8 +11,23 @@ export interface BillingDetailRow {
   date: string;
   sku: string;
   name: string;
+  /** 重量（斤） */
+  weightJin: number;
+  /** 单个克重（g） */
+  unitWeightG: number;
   qty: number;
   factoryPrice: number;
+  amount: number;
+  /** 这一行明细来自哪张入库单，附件用——同一张入库单的多行明细会指向同一张图 */
+  imageUrl: string;
+  rotation: number;
+}
+
+/** 按货号汇总的一行：同一个货号在这个玩具厂 + 这个月里的数量/金额合计 */
+export interface BillingSkuSummary {
+  sku: string;
+  name: string;
+  qty: number;
   amount: number;
 }
 
@@ -25,6 +40,8 @@ export interface BillingSummary {
   totalQty: number;
   totalAmount: number;
   status: BillPaymentStatus;
+  /** 按货号汇总，明细表要么看这个货号自己的、要么看全部，前端按这个来分组/筛选 */
+  bySku: BillingSkuSummary[];
   details: BillingDetailRow[];
 }
 

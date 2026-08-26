@@ -85,7 +85,10 @@ async function handleSubmit() {
   if (dialogMode.value === "create") {
     await createProduct(form);
   } else if (editingId.value) {
-    await updateProduct(editingId.value, form);
+    // 编辑时后端 DTO 不允许传 factoryId（产品归属的玩具厂不可改），这里剔除掉再提交，
+    // 不然会被全局校验的 forbidNonWhitelisted 拦下来报 "property factoryId should not exist"
+    const { factoryId: _factoryId, ...updateDto } = form;
+    await updateProduct(editingId.value, updateDto);
   }
   ElMessage.success("保存成功");
   dialogVisible.value = false;
@@ -115,10 +118,10 @@ onMounted(loadFactories);
       <el-table-column prop="sku" label="货号" width="140" />
       <el-table-column prop="name" label="名称" />
       <el-table-column label="工厂价（元/个）" width="140" align="right">
-        <template #default="{ row }">{{ row.factoryPrice.toFixed(2) }}</template>
+        <template #default="{ row }">{{ row.factoryPrice.toFixed(4) }}</template>
       </el-table-column>
       <el-table-column label="加工价（元/个）" width="140" align="right">
-        <template #default="{ row }">{{ row.processPrice != null ? row.processPrice.toFixed(2) : "-" }}</template>
+        <template #default="{ row }">{{ row.processPrice != null ? row.processPrice.toFixed(4) : "-" }}</template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" />
       <el-table-column label="操作" width="160" fixed="right">
@@ -143,10 +146,10 @@ onMounted(loadFactories);
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item label="工厂价(元/个)" prop="factoryPrice">
-          <el-input-number v-model="form.factoryPrice" :min="0" :precision="2" style="width: 100%" />
+          <el-input-number v-model="form.factoryPrice" :min="0" :precision="4" style="width: 100%" />
         </el-form-item>
         <el-form-item label="加工价(元/个)">
-          <el-input-number v-model="form.processPrice" :min="0" :precision="2" style="width: 100%" />
+          <el-input-number v-model="form.processPrice" :min="0" :precision="4" style="width: 100%" />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="2" />

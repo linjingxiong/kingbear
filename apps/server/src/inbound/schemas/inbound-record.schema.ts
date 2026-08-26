@@ -70,6 +70,10 @@ export class InboundRecord extends Document {
   @Prop({ required: true })
   imageUrl: string;
 
+  /** 图片展示旋转角度：0/90/180/270。只是显示时转一下，原图文件从不改动，不会有画质损失 */
+  @Prop({ type: Number, default: 0 })
+  rotation: number;
+
   /** 大模型原始返回，留痕/排障用 */
   @Prop({ type: Object, default: null })
   ocrRawResult: Record<string, unknown> | null;

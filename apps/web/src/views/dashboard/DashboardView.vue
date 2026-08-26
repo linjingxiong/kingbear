@@ -104,6 +104,27 @@ onMounted(load);
           </el-card>
         </el-col>
       </el-row>
+
+      <!-- "本月加工数量"上面那个笼统的总数不同货号加一起没意义，这里按货号拆开列出来，
+           才是真正能看的详情——跟应收账单里"按货号汇总不合并"是同一个原则 -->
+      <el-row :gutter="16" style="margin-top: 16px">
+        <el-col :span="24">
+          <el-card>
+            <template #header>本月加工数量明细（按货号）</template>
+            <el-table :data="overview.monthBySku" size="default">
+              <el-table-column prop="sku" label="货号" width="140" />
+              <el-table-column prop="name" label="名称" show-overflow-tooltip />
+              <el-table-column label="本月加工数量" align="right" width="160">
+                <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
+              </el-table-column>
+              <el-table-column label="本月加工金额" align="right" width="160">
+                <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!overview.monthBySku.length" description="本月暂无数据" />
+          </el-card>
+        </el-col>
+      </el-row>
     </template>
   </div>
 </template>

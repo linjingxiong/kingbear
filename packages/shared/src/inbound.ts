@@ -36,6 +36,8 @@ export interface InboundRecord {
   needFactorySelect: boolean;
   inboundDate: string;
   imageUrl: string;
+  /** 图片展示旋转角度：0 | 90 | 180 | 270。只是显示时的 CSS 旋转，原图文件字节从不改动，不会有画质损失 */
+  rotation: number;
   status: InboundStatus;
   items: InboundItem[];
   createdAt: string;

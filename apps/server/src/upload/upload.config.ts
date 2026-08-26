@@ -39,3 +39,9 @@ export function toPublicUploadUrl(uploadDir: string, absoluteFilePath: string) {
   const relative = absoluteFilePath.split(uploadDir).pop()!.replace(/\\/g, '/');
   return `/uploads${relative}`;
 }
+
+/** toPublicUploadUrl 的反向操作：对外 URL（/uploads/xxx）→ 磁盘上的真实路径，旋转图片这类需要读写原文件的场景要用 */
+export function toDiskPath(uploadDir: string, publicUrl: string) {
+  const relative = publicUrl.replace(/^\/uploads/, '');
+  return join(uploadDir, relative);
+}
