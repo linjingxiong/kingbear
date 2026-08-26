@@ -2,6 +2,9 @@
 import { onMounted, ref } from "vue";
 import type { DashboardOverview } from "@kingbear/shared";
 import { getDashboardOverview } from "../../api/dashboard";
+// 直接把完整的应收账单页面嵌进首页，不用再跳转过去——首页往下滚就是它，
+// 玩具厂/账期选择、tab、明细这些原样保留，跟单独打开应收账单页是同一个组件
+import BillingView from "../billing/BillingView.vue";
 
 const overview = ref<DashboardOverview | null>(null);
 const loading = ref(false);
@@ -128,6 +131,11 @@ onMounted(load);
         </el-col>
       </el-row>
     </template>
+
+    <!-- 完整的应收账单，直接嵌在首页最下面，不用跳转 -->
+    <div class="billing-embed">
+      <BillingView />
+    </div>
   </div>
 </template>
 
@@ -166,5 +174,25 @@ onMounted(load);
   .dashboard :deep(.el-col) {
     margin-bottom: 16px;
   }
+}
+
+.billing-embed {
+  margin-top: 16px;
+}
+
+/* 嵌进首页之后就不是页面唯一内容了，BillingView 自己那套"撑满剩余视口高度"
+   （height:100% + flex）在这里没有意义，反而可能因为拿不到确定的父级高度而
+   显得奇怪；直接清掉，让它按内容自身高度显示，跟首页其它卡片一样正常往下排 */
+.billing-embed :deep(.billing-page) {
+  height: auto;
+  display: block;
+}
+
+.billing-embed :deep(.statement-card) {
+  display: block;
+}
+
+.billing-embed :deep(.statement-card .el-card__body) {
+  display: block;
 }
 </style>
