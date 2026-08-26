@@ -139,23 +139,19 @@ onMounted(async () => {
 
 <template>
   <div>
-    <el-card class="upload-card">
-      <el-upload
-        drag
-        :show-file-list="false"
-        accept="image/*"
-        :http-request="customUpload"
-        :disabled="uploading"
-      >
-        <div v-loading="uploading" class="upload-inner">
-          <el-icon size="28"><Plus /></el-icon>
-          <div>点击或拖拽上传入库单图片</div>
-        </div>
+    <!-- 原来是一大块拖拽上传区域，太占地方，改成一个小按钮 -->
+    <div class="upload-bar">
+      <el-upload :show-file-list="false" accept="image/*" :http-request="customUpload" :disabled="uploading">
+        <el-button type="primary" :loading="uploading">
+          <el-icon><Plus /></el-icon>
+          导入入库单图片
+        </el-button>
       </el-upload>
-    </el-card>
+    </div>
 
-    <el-card class="search-card">
-      <el-form :model="query" inline>
+    <!-- 查询条件和列表原来是两张卡片，合并成一张，看着是一个整体 -->
+    <el-card>
+      <el-form :model="query" inline class="search-form">
         <el-form-item label="玩具厂">
           <el-select v-model="query.factoryId" clearable placeholder="全部" style="width: 180px" @change="onFactoryChange">
             <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
@@ -173,9 +169,7 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
       </el-form>
-    </el-card>
 
-    <el-card>
       <el-table v-loading="loading" :data="flatRows" border :row-class-name="rowClassName">
         <el-table-column label="玩具厂" width="160">
           <template #default="{ row }: { row: FlatRow }">
@@ -242,14 +236,12 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.upload-card,
-.search-card {
+.upload-bar {
   margin-bottom: 16px;
 }
 
-.upload-inner {
-  padding: 24px;
-  color: #909399;
+.search-form {
+  margin-bottom: 12px;
 }
 
 .qty-diff-icon {
