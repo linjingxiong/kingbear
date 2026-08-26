@@ -27,3 +27,10 @@ body {
 .el-table th.el-table__cell > .cell {
   text-align: center;
 }
+
+/* 固定列（比如"操作"列 fixed="right"）是 Element Plus 另外克隆出来的一张浮在右边的
+   小表格，表头背景色需要单独覆盖一遍，不然只有主表头有色、固定列表头是白的，看着不统一 */
+.el-table__fixed-right th.el-table__cell,
+.el-table__fixed-left th.el-table__cell {
+  background-color: #eef3fb;
+}
