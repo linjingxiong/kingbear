@@ -181,7 +181,7 @@ onMounted(async () => {
         <el-form-item>
           <!-- 不走 OCR，直接建一条空记录跳到确认页——跟识别出来的单据是同一个确认页，
                只是没有图片可看，字段全靠手动填 -->
-          <el-button :loading="manualCreating" @click="handleManualCreate">
+          <el-button type="primary" :loading="manualCreating" @click="handleManualCreate">
             <el-icon><EditPen /></el-icon>
             手工录入
           </el-button>

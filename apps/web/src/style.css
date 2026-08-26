@@ -17,20 +17,19 @@ body {
 }
 
 /* 全局表格样式：表头带底色区分出来，列名居中，看着更像正经后台系统而不是一张干巴巴的表。
-   放在全局而不是某个页面里，所有 el-table（入库列表、账单、玩具厂/产品管理…）统一生效 */
+   放在全局而不是某个页面里，所有 el-table（入库列表、账单、玩具厂/产品管理…）统一生效。
+   固定列（比如"操作"列 fixed="right"）的表头背景，Element Plus 自己是单独用
+   var(--el-table-header-bg-color) 这个变量再刷一遍的，直接改这个变量的值，
+   固定列和普通列的表头颜色就自动统一了，不用再跟它的选择器优先级较劲 */
+.el-table {
+  --el-table-header-bg-color: #eef3fb;
+}
+
 .el-table th.el-table__cell {
-  background-color: #eef3fb;
   color: #1f2d3d;
   font-weight: 600;
 }
 
 .el-table th.el-table__cell > .cell {
   text-align: center;
-}
-
-/* 固定列（比如"操作"列 fixed="right"）是 Element Plus 另外克隆出来的一张浮在右边的
-   小表格，表头背景色需要单独覆盖一遍，不然只有主表头有色、固定列表头是白的，看着不统一 */
-.el-table__fixed-right th.el-table__cell,
-.el-table__fixed-left th.el-table__cell {
-  background-color: #eef3fb;
 }
