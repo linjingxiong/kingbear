@@ -379,4 +379,20 @@ onMounted(async () => {
 :deep(.qty-diff-row td) {
   background-color: #fef0f0;
 }
+
+/* 手机上应收合计和明细表并排会太挤，改成上下堆叠；应收合计这块也不用再 fit-content
+   缩到很窄，直接占满宽度好读一些 */
+@media (max-width: 768px) {
+  .statement-row {
+    flex-direction: column;
+  }
+
+  .statement-summary {
+    width: 100%;
+  }
+
+  .summary-table {
+    max-width: none;
+  }
+}
 </style>
