@@ -10,7 +10,8 @@ const route = useRoute();
 const userStore = useUserStore();
 
 const formRef = ref<FormInstance>();
-const form = reactive({ username: "", password: "" });
+// 默认填好账号密码，方便自己测试登录；正式给别人用之前记得把这两行去掉
+const form = reactive({ username: "admin", password: "admin123" });
 const loading = ref(false);
 
 const rules = {
