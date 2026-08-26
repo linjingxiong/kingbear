@@ -21,7 +21,7 @@ RUN pnpm --filter @kingbear/shared build && pnpm --filter @kingbear/server build
 FROM base AS runtime
 ENV NODE_ENV=production
 WORKDIR /repo
-COPY --from=build /repo/pnpm-workspace.yaml /repo/package.json ./
+COPY --from=build /repo/pnpm-workspace.yaml /repo/package.json /repo/pnpm-lock.yaml ./
 COPY --from=build /repo/packages/shared/package.json packages/shared/package.json
 COPY --from=build /repo/packages/shared/dist packages/shared/dist
 COPY --from=build /repo/apps/server/package.json apps/server/package.json
