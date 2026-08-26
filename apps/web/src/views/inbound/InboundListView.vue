@@ -102,10 +102,6 @@ async function handleDelete(row: InboundRecord) {
   load();
 }
 
-function itemsAmount(row: InboundRecord) {
-  return row.items.reduce((sum, i) => sum + i.amount, 0);
-}
-
 // 不依赖入库确认时存的 hasQuantityDiff 快照，直接拿当前的重量/克重/数量现算一遍——
 // 就算是很早以前录入、当时判断标准还比较松的旧数据，现在打开列表也一样能被拦出来提醒
 function isBigQtyDiff(item: InboundItem) {
@@ -219,7 +215,10 @@ onMounted(async () => {
           </template>
         </el-table-column>
         <el-table-column label="加工金额" width="120" align="right">
-          <template #default="{ row }: { row: FlatRow }">¥{{ itemsAmount(row.record).toFixed(2) }}</template>
+          <template #default="{ row }: { row: FlatRow }">
+            <span v-if="row.item">¥{{ row.item.amount.toFixed(2) }}</span>
+            <span v-else>-</span>
+          </template>
         </el-table-column>
         <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }: { row: FlatRow }">
