@@ -7,6 +7,7 @@ import {
   calculateQuantity,
   hasBigQuantityDiff,
   InboundStatus,
+  type DuplicateConflictResponse,
   type FactoryListItem,
   type InboundItem,
   type InboundRecord,
@@ -78,9 +79,27 @@ function handleSearch() {
 }
 
 async function customUpload(options: UploadRequestOptions) {
+  const file = options.file as File;
   uploading.value = true;
   try {
-    const record = await uploadInboundImage(options.file as File);
+    let record;
+    try {
+      record = await uploadInboundImage(file);
+    } catch (err) {
+      const data = (err as { response?: { data?: DuplicateConflictResponse } }).response?.data;
+      if (data?.duplicateType !== "image") throw err;
+      // 疑似重复图片，人工确认过之后带 force 再传一次，不再拦；点"取消"就到此为止，不算错误
+      try {
+        await ElMessageBox.confirm(data.message, "疑似重复上传", {
+          confirmButtonText: "仍然上传",
+          cancelButtonText: "取消",
+          type: "warning",
+        });
+      } catch {
+        return;
+      }
+      record = await uploadInboundImage(file, true);
+    }
     ElMessage.success("上传成功，正在跳转到确认页");
     router.push(`/inbound/${record.id}/confirm`);
   } finally {

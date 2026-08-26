@@ -33,9 +33,9 @@ export class InboundController {
   @UseInterceptors(
     FileInterceptor('file', inboundImageMulterOptions(process.env.UPLOAD_DIR ?? 'uploads')),
   )
-  async upload(@UploadedFile() file: Express.Multer.File) {
+  async upload(@UploadedFile() file: Express.Multer.File, @Body('force') force?: string) {
     const imageUrl = toPublicUploadUrl(this.uploadDir, file.path);
-    return this.inboundService.createFromUpload(imageUrl, file.path);
+    return this.inboundService.createFromUpload(imageUrl, file.path, force === 'true');
   }
 
   @Post('manual')

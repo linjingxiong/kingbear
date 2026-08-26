@@ -71,6 +71,10 @@ export class InboundRecord extends Document {
   @Prop({ default: '' })
   imageUrl: string;
 
+  /** 上传图片内容的 SHA-256 哈希，用来判断"是不是同一张图片被重复上传了"；手工录入没有图片，留空 */
+  @Prop({ default: '', index: true })
+  imageHash: string;
+
   /** 图片展示旋转角度：0/90/180/270。只是显示时转一下，原图文件从不改动，不会有画质损失 */
   @Prop({ type: Number, default: 0 })
   rotation: number;

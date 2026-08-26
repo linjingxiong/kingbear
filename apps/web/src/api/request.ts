@@ -28,7 +28,10 @@ request.interceptors.response.use(
       router.push("/login");
     }
 
-    ElMessage.error(Array.isArray(message) ? message.join("；") : message);
+    // 疑似重复数据（409，带 duplicateType）交给调用方弹确认框处理，这里不重复弹一次报错提示
+    if (!error.response?.data?.duplicateType) {
+      ElMessage.error(Array.isArray(message) ? message.join("；") : message);
+    }
     return Promise.reject(error);
   },
 );

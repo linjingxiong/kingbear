@@ -8,6 +8,7 @@ import {
   InboundStatus,
   QuantitySource,
   type ConfirmInboundDto,
+  type DuplicateConflictResponse,
   type FactoryListItem,
   type InboundRecord,
   type Product,
@@ -341,13 +342,29 @@ async function handleSubmit() {
 
   submitting.value = true;
   try {
-    if (record.value?.status === InboundStatus.Completed) {
-      await updateInbound(recordId, dto);
-      ElMessage.success("已保存修改，账单会自动同步最新金额");
-    } else {
-      await confirmInbound(recordId, dto);
-      ElMessage.success("入库单已确认完成");
+    const isUpdate = record.value?.status === InboundStatus.Completed;
+    const submit = () => (isUpdate ? updateInbound(recordId, dto) : confirmInbound(recordId, dto));
+
+    try {
+      await submit();
+    } catch (err) {
+      const data = (err as { response?: { data?: DuplicateConflictResponse } }).response?.data;
+      if (data?.duplicateType !== "item") throw err;
+      // 疑似重复录入，人工确认过之后带 force 再提交一次，不再拦；点"返回检查"就到此为止
+      try {
+        await ElMessageBox.confirm(data.message, "疑似重复录入", {
+          confirmButtonText: "确认按此提交",
+          cancelButtonText: "返回检查",
+          type: "warning",
+        });
+      } catch {
+        return;
+      }
+      dto.force = true;
+      await submit();
     }
+
+    ElMessage.success(isUpdate ? "已保存修改，账单会自动同步最新金额" : "入库单已确认完成");
     router.push("/inbound");
   } finally {
     submitting.value = false;

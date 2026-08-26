@@ -62,6 +62,16 @@ export interface ConfirmInboundDto {
     factoryPrice: number;
     remark?: string;
   }>;
+  /** 后端查出疑似重复数据后会拦一次，人工确认"确实要这样提交"后带上这个标记再提交一次 */
+  force?: boolean;
+}
+
+/** 提交/上传遇到疑似重复数据时，后端返回 409，body 是这个结构 */
+export interface DuplicateConflictResponse {
+  message: string;
+  duplicateType: "image" | "item";
+  /** 疑似重复的原有入库单号，供提示文案里显示 */
+  conflictCodes: string[];
 }
 
 /** 入库记录列表搜索条件 */

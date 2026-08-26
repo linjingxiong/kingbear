@@ -1,7 +1,9 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
-import { InboundStatus, QuantitySource } from '@kingbear/shared';
+import { createHash } from 'crypto';
+import { readFile } from 'fs/promises';
+import { InboundStatus, QuantitySource, type DuplicateConflictResponse } from '@kingbear/shared';
 import { InboundRecord } from './schemas/inbound-record.schema';
 import { ConfirmInboundDto } from './dto/confirm-inbound.dto';
 import { SearchInboundDto } from './dto/search-inbound.dto';
@@ -20,8 +22,25 @@ export class InboundService {
     private readonly productService: ProductService,
   ) {}
 
-  /** 上传图片后：存图 → 建 processing 记录 → 调 OCR → 后处理 → 落成 pending_confirm */
-  async createFromUpload(imageUrl: string, imageFilePath: string) {
+  /**
+   * 上传图片后：存图 → 建 processing 记录 → 调 OCR → 后处理 → 落成 pending_confirm。
+   * 先按内容算个哈希，跟已经上传过的图片比一下——同一张单据照片被误传两次（比如手抖点了
+   * 两下、或者忘了传过又传一遍）是最容易发生的重复，force 不为 true 时先拦一次让人工确认。
+   */
+  async createFromUpload(imageUrl: string, imageFilePath: string, force = false) {
+    const imageHash = createHash('sha256').update(await readFile(imageFilePath)).digest('hex');
+
+    if (!force) {
+      const existing = await this.inboundModel.findOne({ imageHash }).sort({ createdAt: -1 });
+      if (existing) {
+        throw new ConflictException({
+          message: `这张图片跟入库单「${existing.code}」看起来是同一张，是不是重复上传了？`,
+          duplicateType: 'image',
+          conflictCodes: [existing.code],
+        } satisfies DuplicateConflictResponse);
+      }
+    }
+
     const code = await this.generateCode();
 
     const record = await this.inboundModel.create({
@@ -30,6 +49,7 @@ export class InboundService {
       needFactorySelect: true,
       inboundDate: new Date(),
       imageUrl,
+      imageHash,
       ocrRawResult: null,
       status: InboundStatus.Processing,
       items: [],
@@ -125,6 +145,17 @@ export class InboundService {
   /** 人工确认页提交：重新计算每行金额，状态流转到 completed */
   async confirm(id: string, dto: ConfirmInboundDto) {
     const record = await this.getOrThrow(id);
+
+    if (!dto.force) {
+      const conflictCodes = await this.findDuplicateItemCodes(dto, id);
+      if (conflictCodes.length) {
+        throw new ConflictException({
+          message: `同一天、同一个货号、同样的重量和数量，在入库单「${conflictCodes.join('、')}」里已经录过了，是不是重复录入了？`,
+          duplicateType: 'item',
+          conflictCodes,
+        } satisfies DuplicateConflictResponse);
+      }
+    }
 
     record.factoryId = new Types.ObjectId(dto.factoryId);
     record.needFactorySelect = false;
@@ -224,6 +255,45 @@ export class InboundService {
     return record;
   }
 
+  /**
+   * 同一个玩具厂、同一天，货号、数量、单个克重都一样的一行——很可能是同一批货被
+   * 重复录入了（比如单据识别了两次，或者手工录入的时候把已经录过的又录了一遍）。
+   * 只跟"已完成"的记录比，正在识别中/待确认的不算数；排除自己这条，不然编辑已完成
+   * 的单据保存一次就会跟自己撞上。
+   */
+  private async findDuplicateItemCodes(dto: ConfirmInboundDto, excludeId: string): Promise<string[]> {
+    const { start, end } = dayRange(dto.inboundDate);
+    const candidates = await this.inboundModel.find({
+      _id: { $ne: excludeId },
+      factoryId: new Types.ObjectId(dto.factoryId),
+      status: InboundStatus.Completed,
+      inboundDate: { $gte: start, $lt: end },
+    });
+
+    const dtoFinalQtys = dto.items.map((item) => ({
+      sku: item.sku,
+      unitWeightG: item.unitWeightG,
+      qtyFinal:
+        item.quantitySource === QuantitySource.Declared
+          ? (item.qtyDeclared ?? calculateQuantity(item.weightJin, item.unitWeightG))
+          : calculateQuantity(item.weightJin, item.unitWeightG),
+    }));
+
+    const codes = new Set<string>();
+    for (const candidate of candidates) {
+      const hit = candidate.items.some((existingItem) =>
+        dtoFinalQtys.some(
+          (item) =>
+            item.sku === existingItem.sku &&
+            item.unitWeightG === existingItem.unitWeightG &&
+            item.qtyFinal === existingItem.qtyFinal,
+        ),
+      );
+      if (hit) codes.add(candidate.code);
+    }
+    return [...codes];
+  }
+
   private async getOrThrow(id: string) {
     const record = await this.inboundModel.findById(id);
     if (!record) throw new NotFoundException('入库单不存在');
@@ -250,4 +320,12 @@ export class InboundService {
 
 function escapeRegExp(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 某一天的 [00:00, 次日00:00) 区间，用于按天比对是不是"同一天"入库的 */
+function dayRange(dateStr: string) {
+  const d = new Date(dateStr);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  return { start, end };
 }

@@ -1,9 +1,10 @@
 import type { ConfirmInboundDto, InboundRecord, SearchInboundQuery } from "@kingbear/shared";
 import request from "./request";
 
-export function uploadInboundImage(file: File) {
+export function uploadInboundImage(file: File, force = false) {
   const form = new FormData();
   form.append("file", file);
+  if (force) form.append("force", "true");
   return request.post<never, InboundRecord>("/inbound/upload", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
