@@ -4,13 +4,24 @@ import { Model } from 'mongoose';
 import { BillPaymentStatus, InboundStatus } from '@kingbear/shared';
 import { InboundRecord } from '../inbound/schemas/inbound-record.schema';
 import { Factory } from '../factory/schemas/factory.schema';
+import { Product } from '../product/schemas/product.schema';
 import { MonthlyBillStatus } from '../billing/schemas/monthly-bill-status.schema';
+
+/** 从 InboundRecord.items 里拆出来、金额已经按实时产品价格重算过的一行 */
+interface LiveItem {
+  factoryId: string | null;
+  sku: string;
+  name: string;
+  qtyFinal: number;
+  amount: number;
+}
 
 @Injectable()
 export class DashboardService {
   constructor(
     @InjectModel(InboundRecord.name) private readonly inboundModel: Model<InboundRecord>,
     @InjectModel(Factory.name) private readonly factoryModel: Model<Factory>,
+    @InjectModel(Product.name) private readonly productModel: Model<Product>,
     @InjectModel(MonthlyBillStatus.name)
     private readonly billStatusModel: Model<MonthlyBillStatus>,
   ) {}
@@ -23,70 +34,94 @@ export class DashboardService {
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const [today, month, ranking, alerts, monthBySku] = await Promise.all([
-      this.aggregateRange(todayStart, todayEnd),
-      this.aggregateRange(monthStart, monthEnd),
-      this.getFactoryRanking(monthStart, monthEnd),
-      this.getAlerts(yearMonth),
-      this.getMonthBySku(monthStart, monthEnd),
+    const [todayRecords, monthRecords] = await Promise.all([
+      this.findCompleted(todayStart, todayEnd),
+      this.findCompleted(monthStart, monthEnd),
+    ]);
+    // 首页这几块统计（今日/本月/玩具厂排行/按货号明细/未收款）全都基于同一份"本月已完成
+    // 记录 + 实时产品价格"算出来的明细行，跟应收账单、入库管理列表用的是同一个口径，
+    // 不会出现"首页说 8 万、账单说 9 万"这种同一个数字两个地方对不上的情况
+    const [todayItems, monthItems] = await Promise.all([
+      this.withLivePrices(todayRecords),
+      this.withLivePrices(monthRecords),
     ]);
 
-    const unpaidAmount = await this.getUnpaidAmount(yearMonth);
+    const [ranking, alerts, unpaidAmount] = await Promise.all([
+      this.getFactoryRanking(monthItems),
+      this.getAlerts(yearMonth),
+      this.getUnpaidAmount(yearMonth, monthItems),
+    ]);
 
     return {
       today: {
-        inboundCount: today.inboundCount,
-        processedQty: today.processedQty,
-        processedAmount: today.processedAmount,
+        inboundCount: todayRecords.length,
+        processedQty: sumQty(todayItems),
+        processedAmount: sumAmount(todayItems),
       },
       month: {
-        processedAmount: month.processedAmount,
-        inboundCount: month.inboundCount,
-        processedQty: month.processedQty,
+        processedAmount: sumAmount(monthItems),
+        inboundCount: monthRecords.length,
+        processedQty: sumQty(monthItems),
         unpaidAmount,
       },
       ranking,
       alerts,
-      monthBySku,
+      monthBySku: this.groupBySku(monthItems),
     };
   }
 
-  private async aggregateRange(start: Date, end: Date) {
-    const records = await this.inboundModel.find({
+  private findCompleted(start: Date, end: Date) {
+    return this.inboundModel.find({
       status: InboundStatus.Completed,
       inboundDate: { $gte: start, $lt: end },
     });
-    const processedQty = records.reduce(
-      (sum, r) => sum + r.items.reduce((s, i) => s + i.qtyFinal, 0),
-      0,
-    );
-    const processedAmount = records.reduce(
-      (sum, r) => sum + r.items.reduce((s, i) => s + i.amount, 0),
-      0,
-    );
-    return { inboundCount: records.length, processedQty, processedAmount };
   }
 
-  private async getFactoryRanking(monthStart: Date, monthEnd: Date) {
-    const rows = await this.inboundModel.aggregate([
-      { $match: { status: InboundStatus.Completed, inboundDate: { $gte: monthStart, $lt: monthEnd } } },
-      { $unwind: '$items' },
-      { $group: { _id: '$factoryId', monthAmount: { $sum: '$items.amount' } } },
-      { $sort: { monthAmount: -1 } },
-    ]);
+  /** 工厂价不用入库确认时存死的快照，改成实时读产品档案当前的价格——跟 billing.service /
+   * inbound.service 的 findAll 是同一份逻辑，三处口径必须一致 */
+  private async withLivePrices(records: InboundRecord[]): Promise<LiveItem[]> {
+    const factoryIds = [...new Set(records.map((r) => r.factoryId).filter(Boolean).map(String))];
+    const priceMaps = new Map<string, Map<string, number>>();
+    await Promise.all(
+      factoryIds.map(async (factoryId) => {
+        const products = await this.productModel.find({ factoryId });
+        priceMaps.set(factoryId, new Map(products.map((p) => [p.sku, p.factoryPrice])));
+      }),
+    );
 
-    const factories = await this.factoryModel.find({
-      _id: { $in: rows.map((r) => r._id).filter(Boolean) },
+    return records.flatMap((r) => {
+      const factoryId = r.factoryId ? String(r.factoryId) : null;
+      const priceMap = factoryId ? priceMaps.get(factoryId) : undefined;
+      return r.items.map((item) => {
+        const factoryPrice = priceMap?.get(item.sku) ?? item.factoryPrice;
+        return {
+          factoryId,
+          sku: item.sku,
+          name: item.name,
+          qtyFinal: item.qtyFinal,
+          amount: item.qtyFinal * factoryPrice,
+        };
+      });
     });
+  }
+
+  private async getFactoryRanking(monthItems: LiveItem[]) {
+    const amountByFactory = new Map<string, number>();
+    for (const item of monthItems) {
+      if (!item.factoryId) continue;
+      amountByFactory.set(item.factoryId, (amountByFactory.get(item.factoryId) ?? 0) + item.amount);
+    }
+
+    const factories = await this.factoryModel.find({ _id: { $in: [...amountByFactory.keys()] } });
     const nameMap = new Map(factories.map((f) => [String(f._id), f.name]));
 
-    return rows
-      .filter((r) => r._id)
-      .map((r) => ({
-        factoryId: String(r._id),
-        factoryName: nameMap.get(String(r._id)) ?? '未知玩具厂',
-        monthAmount: r.monthAmount,
-      }));
+    return [...amountByFactory.entries()]
+      .map(([factoryId, monthAmount]) => ({
+        factoryId,
+        factoryName: nameMap.get(factoryId) ?? '未知玩具厂',
+        monthAmount,
+      }))
+      .sort((a, b) => b.monthAmount - a.monthAmount);
   }
 
   /**
@@ -94,22 +129,18 @@ export class DashboardService {
    * 首页只放一个笼统的数字容易让人误会。这里按货号拆开算，前端展开明细表，
    * 才是真正能看的"详情"。
    */
-  private async getMonthBySku(monthStart: Date, monthEnd: Date) {
-    const rows = await this.inboundModel.aggregate([
-      { $match: { status: InboundStatus.Completed, inboundDate: { $gte: monthStart, $lt: monthEnd } } },
-      { $unwind: '$items' },
-      {
-        $group: {
-          _id: '$items.sku',
-          name: { $first: '$items.name' },
-          qty: { $sum: '$items.qtyFinal' },
-          amount: { $sum: '$items.amount' },
-        },
-      },
-      { $sort: { amount: -1 } },
-    ]);
-
-    return rows.map((r) => ({ sku: r._id as string, name: r.name as string, qty: r.qty, amount: r.amount }));
+  private groupBySku(monthItems: LiveItem[]) {
+    const map = new Map<string, { sku: string; name: string; qty: number; amount: number }>();
+    for (const item of monthItems) {
+      const existing = map.get(item.sku);
+      if (existing) {
+        existing.qty += item.qtyFinal;
+        existing.amount += item.amount;
+      } else {
+        map.set(item.sku, { sku: item.sku, name: item.name, qty: item.qtyFinal, amount: item.amount });
+      }
+    }
+    return [...map.values()].sort((a, b) => b.amount - a.amount);
   }
 
   private async getAlerts(yearMonth: string) {
@@ -128,29 +159,30 @@ export class DashboardService {
    * 未收款金额 = 本月加工金额中，收款状态不是"已收款"的部分。
    * 没有 monthlyBillStatus 记录的玩具厂，默认视为"未收款"（和 billing.service 的默认值保持一致）。
    */
-  private async getUnpaidAmount(yearMonth: string) {
-    const { start, end } = monthRangeFromKey(yearMonth);
-
-    const byFactory = await this.inboundModel.aggregate([
-      { $match: { status: InboundStatus.Completed, inboundDate: { $gte: start, $lt: end } } },
-      { $unwind: '$items' },
-      { $group: { _id: '$factoryId', amount: { $sum: '$items.amount' } } },
-    ]);
-    if (byFactory.length === 0) return 0;
+  private async getUnpaidAmount(yearMonth: string, monthItems: LiveItem[]) {
+    const amountByFactory = new Map<string, number>();
+    for (const item of monthItems) {
+      if (!item.factoryId) continue;
+      amountByFactory.set(item.factoryId, (amountByFactory.get(item.factoryId) ?? 0) + item.amount);
+    }
+    if (!amountByFactory.size) return 0;
 
     const paidFactoryIds = new Set(
-      (
-        await this.billStatusModel.find({ yearMonth, status: BillPaymentStatus.Paid })
-      ).map((s) => String(s.factoryId)),
+      (await this.billStatusModel.find({ yearMonth, status: BillPaymentStatus.Paid })).map((s) =>
+        String(s.factoryId),
+      ),
     );
 
-    return byFactory
-      .filter((row) => row._id && !paidFactoryIds.has(String(row._id)))
-      .reduce((sum, row) => sum + row.amount, 0);
+    return [...amountByFactory.entries()]
+      .filter(([factoryId]) => !paidFactoryIds.has(factoryId))
+      .reduce((sum, [, amount]) => sum + amount, 0);
   }
 }
 
-function monthRangeFromKey(yearMonth: string) {
-  const [y, m] = yearMonth.split('-').map(Number);
-  return { start: new Date(y, m - 1, 1), end: new Date(y, m, 1) };
+function sumQty(items: LiveItem[]) {
+  return items.reduce((sum, i) => sum + i.qtyFinal, 0);
+}
+
+function sumAmount(items: LiveItem[]) {
+  return items.reduce((sum, i) => sum + i.amount, 0);
 }
