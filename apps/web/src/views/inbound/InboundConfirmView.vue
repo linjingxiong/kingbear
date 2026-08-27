@@ -168,7 +168,7 @@ function hasDiff(item: EditableItem) {
   return item.qtyDeclared != null && item.qtyDeclared !== qtyCalculated(item);
 }
 
-// "差多少算太多"（相差超过 1%）这个判断标准放在 @kingbear/shared 里，入库确认页提交前的拦截、
+// "差多少算太多"（相差超过 5 个）这个判断标准放在 @kingbear/shared 里，入库确认页提交前的拦截、
 // 入库管理列表、应收账单的提醒用的是同一份逻辑，不会出现好几套标准各判各的
 function hasBigDiff(item: EditableItem) {
   return item.qtyDeclared != null && hasBigQuantityDiff(item.qtyDeclared, qtyCalculated(item));

@@ -41,7 +41,7 @@ async function loadFactories() {
   }
 }
 
-// 跟入库确认页、入库管理列表用同一份"相差超过 1% 算异常"的标准，账单上金额算得再准，
+// 跟入库确认页、入库管理列表用同一份"相差超过 5 个算异常"的标准，账单上金额算得再准，
 // 源头数量本身就录错的话也要能看出来
 function isBigQtyDiff(row: BillingDetailRow) {
   return hasBigQuantityDiff(row.qty, calculateQuantity(row.weightJin, row.unitWeightG));
@@ -206,7 +206,7 @@ onMounted(async () => {
                       {{ row.qty.toLocaleString() }}
                       <el-tooltip
                         v-if="isBigQtyDiff(row)"
-                        content="跟按重量算出来的数量相差超过 1%，很可能录错了，建议核对"
+                        content="跟按重量算出来的数量相差超过 5 个，很可能录错了，建议核对"
                       >
                         <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
                       </el-tooltip>

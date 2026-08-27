@@ -1,11 +1,12 @@
-// 一次性脚本：把已经入库确认过的历史记录里，每一行的 hasQuantityDiff 按新的"相差超过 1%"
-// 标准重新算一遍存回去。改用新标准之前确认的记录，存的还是旧标准（数量跟计算值只要不完全
-// 相等就算差异）算出来的结果，跑一遍这个脚本让首页的"数量差异"提醒数量跟入库管理/应收账单
-// 里现算的结果对得上。之后新入库确认/修改都会自动用新标准存，不需要再跑这个脚本。
+// 一次性脚本：把已经入库确认过的历史记录里，每一行的 hasQuantityDiff 按最新的判断标准
+// 重新算一遍存回去。改标准之前确认的记录，存的还是旧标准算出来的结果，跑一遍这个脚本
+// 让首页的"数量差异"提醒数量跟入库管理/应收账单里现算的结果对得上。之后新入库确认/
+// 修改都会自动用最新标准存，不需要再跑这个脚本——但每次改判断标准（改这个阈值本身）
+// 都要重新跑一次这个脚本，把历史数据也刷一遍。
 import mongoose from 'mongoose';
 
 const uri = process.env.MONGO_URI || 'mongodb://localhost:27017/kingbear';
-const BIG_QTY_DIFF_RATIO = 0.01;
+const BIG_QTY_DIFF_ABS = 5; // 跟 packages/shared/src/quantity.ts 保持一致
 
 function calculateQuantity(weightJin, unitWeightG) {
   if (!unitWeightG || unitWeightG <= 0) return 0;
@@ -13,8 +14,7 @@ function calculateQuantity(weightJin, unitWeightG) {
 }
 
 function hasBigQuantityDiff(qty, calculated) {
-  if (!calculated) return qty > 0;
-  return Math.abs(qty - calculated) / calculated > BIG_QTY_DIFF_RATIO;
+  return Math.abs(qty - calculated) > BIG_QTY_DIFF_ABS;
 }
 
 await mongoose.connect(uri);

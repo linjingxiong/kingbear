@@ -234,7 +234,7 @@ onMounted(async () => {
               {{ row.qtyFinal }}
               <el-tooltip
                 v-if="isBigQtyDiff(row)"
-                content="跟按重量算出来的数量相差超过 1%，很可能录错了，建议进去核对"
+                content="跟按重量算出来的数量相差超过 5 个，很可能录错了，建议进去核对"
               >
                 <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
               </el-tooltip>
