@@ -39,19 +39,14 @@ export class FactoryService {
   async findAll(): Promise<FactoryWithStats[]> {
     const factories = await this.factoryModel.find().sort({ createdAt: -1 }).lean();
 
-    const [productCounts, amountSums] = await Promise.all([
+    const [productCounts, amountMap] = await Promise.all([
       this.productModel.aggregate([
         { $group: { _id: '$factoryId', count: { $sum: 1 } } },
       ]),
-      this.inboundModel.aggregate([
-        { $match: { status: InboundStatus.Completed } },
-        { $unwind: '$items' },
-        { $group: { _id: '$factoryId', amount: { $sum: '$items.amount' } } },
-      ]),
+      this.getAmountByFactory(),
     ]);
 
     const countMap = new Map(productCounts.map((c) => [String(c._id), c.count]));
-    const amountMap = new Map(amountSums.map((a) => [String(a._id), a.amount]));
 
     // .lean() 拿到的是纯对象，不会走 schema 的 toJSON 转换（那个只把 _id 转成 id 用来给前端），
     // 这里手动补一下，不然这个列表接口会漏出 _id 而不是 id
@@ -61,6 +56,37 @@ export class FactoryService {
       productCount: countMap.get(String(_id)) ?? 0,
       processedAmount: amountMap.get(String(_id)) ?? 0,
     }));
+  }
+
+  /**
+   * 累计加工金额不用入库确认时存死的工厂价快照，改成实时读产品档案当前的价格——
+   * 跟 billing.service / inbound.service / dashboard.service 是同一份逻辑，四处口径
+   * 必须一致，不然会出现"玩具厂列表说 8 万、应收账单说 9 万"这种同一个数字对不上的情况。
+   */
+  private async getAmountByFactory(): Promise<Map<string, number>> {
+    const records = await this.inboundModel.find({ status: InboundStatus.Completed });
+
+    const factoryIds = [...new Set(records.map((r) => r.factoryId).filter(Boolean).map(String))];
+    const priceMaps = new Map<string, Map<string, number>>();
+    await Promise.all(
+      factoryIds.map(async (factoryId) => {
+        const products = await this.productModel.find({ factoryId });
+        priceMaps.set(factoryId, new Map(products.map((p) => [p.sku, p.factoryPrice])));
+      }),
+    );
+
+    const amountMap = new Map<string, number>();
+    for (const record of records) {
+      if (!record.factoryId) continue;
+      const factoryId = String(record.factoryId);
+      const priceMap = priceMaps.get(factoryId);
+      const recordAmount = record.items.reduce((sum, item) => {
+        const factoryPrice = priceMap?.get(item.sku) ?? item.factoryPrice;
+        return sum + item.qtyFinal * factoryPrice;
+      }, 0);
+      amountMap.set(factoryId, (amountMap.get(factoryId) ?? 0) + recordAmount);
+    }
+    return amountMap;
   }
 
   async findOne(id: string) {
