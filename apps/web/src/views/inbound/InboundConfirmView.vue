@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
@@ -15,7 +15,7 @@ import {
 } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { findProductsBySku, listProductsByFactory } from "../../api/product";
-import { confirmInbound, getInbound, rotateInboundImage, updateInbound } from "../../api/inbound";
+import { checkInboundDuplicates, confirmInbound, getInbound, rotateInboundImage, updateInbound } from "../../api/inbound";
 
 const route = useRoute();
 const router = useRouter();
@@ -175,6 +175,46 @@ function hasBigDiff(item: EditableItem) {
 }
 
 const totalAmount = computed(() => items.reduce((sum, i) => sum + amount(i), 0));
+
+// 疑似重复的入库单号，在录入过程中实时提醒（不用等点了"确认入库"才知道），
+// 提交时后端还会再拦一次兜底，这里只是提前让人看到、不影响能不能编辑
+const duplicateCodes = ref<string[]>([]);
+let duplicateCheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleDuplicateCheck() {
+  clearTimeout(duplicateCheckTimer);
+  duplicateCheckTimer = setTimeout(runDuplicateCheck, 500);
+}
+
+async function runDuplicateCheck() {
+  if (!factoryId.value || !inboundDate.value || !items.length) {
+    duplicateCodes.value = [];
+    return;
+  }
+  try {
+    const { conflictCodes } = await checkInboundDuplicates(recordId, {
+      factoryId: factoryId.value,
+      inboundDate: inboundDate.value,
+      items: items.map((i) => ({
+        productId: i.productId,
+        sku: i.sku,
+        name: i.name,
+        weightJin: i.weightJin,
+        unitWeightG: i.unitWeightG,
+        qtyDeclared: i.qtyDeclared,
+        quantitySource: i.quantitySource,
+        factoryPrice: i.factoryPrice,
+        remark: i.remark,
+      })),
+    });
+    duplicateCodes.value = conflictCodes;
+  } catch {
+    // 货号/重量这些字段还没填全时后端会校验不通过，这只是提前提醒用的，静默忽略就行，
+    // 不用因为这个弹错误提示打扰正在录入的人
+  }
+}
+
+watch([factoryId, inboundDate, items], scheduleDuplicateCheck, { deep: true });
 
 async function load() {
   loading.value = true;
@@ -378,6 +418,14 @@ onMounted(load);
   <div v-loading="loading" class="confirm-page">
     <div class="confirm-layout">
       <el-card header="OCR 识别结果 · 人工确认">
+          <el-alert
+            v-if="duplicateCodes.length"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="duplicate-alert"
+            :title="`疑似重复录入：跟入库单「${duplicateCodes.join('、')}」同一天、同货号、同数量，请核对是否已经录过了`"
+          />
           <el-form label-width="90px">
             <el-row :gutter="12">
               <el-col :span="12">
@@ -499,6 +547,10 @@ onMounted(load);
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.duplicate-alert {
+  margin-bottom: 16px;
 }
 
 /* 撑满可用宽度，靠 justify-content 把里面那个固定尺寸的 image-frame 水平居中，

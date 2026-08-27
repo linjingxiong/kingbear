@@ -14,6 +14,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { InboundService } from './inbound.service';
 import { ConfirmInboundDto } from './dto/confirm-inbound.dto';
+import { CheckDuplicatesDto } from './dto/check-duplicates.dto';
 import { SearchInboundDto } from './dto/search-inbound.dto';
 import { RotateImageDto } from './dto/rotate-image.dto';
 import { inboundImageMulterOptions, toPublicUploadUrl } from '../upload/upload.config';
@@ -46,6 +47,12 @@ export class InboundController {
   @Post(':id/confirm')
   confirm(@Param('id') id: string, @Body() dto: ConfirmInboundDto) {
     return this.inboundService.confirm(id, dto);
+  }
+
+  /** 确认页录入过程中实时查一下疑似重复，不等到点"确认入库"才提醒 */
+  @Post(':id/check-duplicates')
+  checkDuplicates(@Param('id') id: string, @Body() dto: CheckDuplicatesDto) {
+    return this.inboundService.checkDuplicates(id, dto);
   }
 
   @Patch(':id')

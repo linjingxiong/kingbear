@@ -19,6 +19,11 @@ export function confirmInbound(id: string, dto: ConfirmInboundDto) {
   return request.post<never, InboundRecord>(`/inbound/${id}/confirm`, dto);
 }
 
+/** 确认页录入过程中实时查一下疑似重复，不用等到点"确认入库"才发现 */
+export function checkInboundDuplicates(id: string, dto: Pick<ConfirmInboundDto, "factoryId" | "inboundDate" | "items">) {
+  return request.post<never, { conflictCodes: string[] }>(`/inbound/${id}/check-duplicates`, dto);
+}
+
 export function updateInbound(id: string, dto: ConfirmInboundDto) {
   return request.patch<never, InboundRecord>(`/inbound/${id}`, dto);
 }

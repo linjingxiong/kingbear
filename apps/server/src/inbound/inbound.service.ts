@@ -150,7 +150,7 @@ export class InboundService {
       const conflictCodes = await this.findDuplicateItemCodes(dto, id);
       if (conflictCodes.length) {
         throw new ConflictException({
-          message: `同一天、同一个货号、同样的重量和数量，在入库单「${conflictCodes.join('、')}」里已经录过了，是不是重复录入了？`,
+          message: `同一天、同一个货号、同样的数量，在入库单「${conflictCodes.join('、')}」里已经录过了，是不是重复录入了？`,
           duplicateType: 'item',
           conflictCodes,
         } satisfies DuplicateConflictResponse);
@@ -256,12 +256,25 @@ export class InboundService {
   }
 
   /**
-   * 同一个玩具厂、同一天，货号、数量、单个克重都一样的一行——很可能是同一批货被
-   * 重复录入了（比如单据识别了两次，或者手工录入的时候把已经录过的又录了一遍）。
-   * 只跟"已完成"的记录比，正在识别中/待确认的不算数；排除自己这条，不然编辑已完成
-   * 的单据保存一次就会跟自己撞上。
+   * 供确认页在录入过程中实时提醒用的：不落库、只查，跟 confirm() 里拦截用的是同一份判断逻辑。
+   * excludeId 传当前这条正在编辑/确认的记录 id，避免跟自己撞上。
    */
-  private async findDuplicateItemCodes(dto: ConfirmInboundDto, excludeId: string): Promise<string[]> {
+  async checkDuplicates(id: string, dto: Pick<ConfirmInboundDto, 'factoryId' | 'inboundDate' | 'items'>) {
+    if (!dto.factoryId || !dto.inboundDate || !dto.items?.length) return { conflictCodes: [] };
+    return { conflictCodes: await this.findDuplicateItemCodes(dto, id) };
+  }
+
+  /**
+   * 同一个玩具厂、同一天、同一个货号、同样的数量——很可能是同一批货被重复录入了
+   * （比如单据识别了两次，或者手工录入的时候把已经录过的又录了一遍）。不比对克重：
+   * 同一张单据重新识别一次，OCR 认出来的单个克重经常会有细微差异，但单据上人工写的
+   * 数量是死的、最稳定，拿数量 + 货号来判断更准。只跟"已完成"的记录比，正在识别中/
+   * 待确认的不算数；排除自己这条，不然编辑已完成的单据保存一次就会跟自己撞上。
+   */
+  private async findDuplicateItemCodes(
+    dto: Pick<ConfirmInboundDto, 'factoryId' | 'inboundDate' | 'items'>,
+    excludeId: string,
+  ): Promise<string[]> {
     const { start, end } = dayRange(dto.inboundDate);
     const candidates = await this.inboundModel.find({
       _id: { $ne: excludeId },
@@ -272,7 +285,6 @@ export class InboundService {
 
     const dtoFinalQtys = dto.items.map((item) => ({
       sku: item.sku,
-      unitWeightG: item.unitWeightG,
       qtyFinal:
         item.quantitySource === QuantitySource.Declared
           ? (item.qtyDeclared ?? calculateQuantity(item.weightJin, item.unitWeightG))
@@ -282,12 +294,7 @@ export class InboundService {
     const codes = new Set<string>();
     for (const candidate of candidates) {
       const hit = candidate.items.some((existingItem) =>
-        dtoFinalQtys.some(
-          (item) =>
-            item.sku === existingItem.sku &&
-            item.unitWeightG === existingItem.unitWeightG &&
-            item.qtyFinal === existingItem.qtyFinal,
-        ),
+        dtoFinalQtys.some((item) => item.sku === existingItem.sku && item.qtyFinal === existingItem.qtyFinal),
       );
       if (hit) codes.add(candidate.code);
     }
