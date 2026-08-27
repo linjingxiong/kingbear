@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { FilterQuery, Model, Types } from 'mongoose';
+import { AnyKeys, FilterQuery, Model, Types } from 'mongoose';
 import { createHash } from 'crypto';
 import { readFile } from 'fs/promises';
 import { InboundStatus, QuantitySource, type DuplicateConflictResponse } from '@kingbear/shared';
@@ -41,9 +41,7 @@ export class InboundService {
       }
     }
 
-    const code = await this.generateCode();
-
-    const record = await this.inboundModel.create({
+    const record = await this.createWithGeneratedCode((code) => ({
       code,
       factoryId: null,
       needFactorySelect: true,
@@ -53,7 +51,7 @@ export class InboundService {
       ocrRawResult: null,
       status: InboundStatus.Processing,
       items: [],
-    });
+    }));
 
     // imageUrl 是存进数据库、给前端展示用的对外访问路径（/uploads/...）；
     // OCR Provider 需要读文件内容，传的是磁盘上的真实路径
@@ -133,8 +131,7 @@ export class InboundService {
    * 复用同一个确认页/同一套 confirm 接口，人工录入和识别出来的单据最后走的是同一条路。
    */
   async createManual() {
-    const code = await this.generateCode();
-    return this.inboundModel.create({
+    return this.createWithGeneratedCode((code) => ({
       code,
       factoryId: null,
       needFactorySelect: true,
@@ -143,7 +140,7 @@ export class InboundService {
       ocrRawResult: null,
       status: InboundStatus.PendingConfirm,
       items: [],
-    });
+    }));
   }
 
   /** 人工确认页提交：重新计算每行金额，状态流转到 completed */
@@ -343,21 +340,45 @@ export class InboundService {
     return record;
   }
 
-  /** 入库单号：RK + 当天日期 + 3位当天序号，如 RK20260821001 */
-  private async generateCode() {
+  /**
+   * 生成入库单号 + 建记录：即使 generateCode() 万一还是跟并发的另一次请求撞了号
+   * （唯一索引兜底拦下来），这里再重试几次换个新号，不会直接 500 给用户看
+   */
+  private async createWithGeneratedCode(buildDoc: (code: string) => AnyKeys<InboundRecord>) {
+    for (let attempt = 0; ; attempt++) {
+      const code = await this.generateCode();
+      try {
+        return await this.inboundModel.create(buildDoc(code));
+      } catch (err) {
+        const isDuplicateCode = (err as { code?: number }).code === 11000;
+        if (!isDuplicateCode || attempt >= 2) throw err;
+      }
+    }
+  }
+
+  /**
+   * 入库单号：RK + 当天日期 + 3位当天序号，如 RK20260821001。
+   *
+   * 之前用的是"今天已经有多少条记录"（countDocuments）来算下一个序号——只要今天有任意一条
+   * 记录被删过（这次开发过程里删过很多测试数据），"现在还剩多少条"就会比"今天总共编到多少号"
+   * 小，算出来的新编号会跟一个还存在的旧记录撞上，MongoDB 唯一索引直接拒绝插入，抛 500。
+   * 改成找当天已经用到的最大序号、在此基础上 +1，不受删除影响；同时保留 unique 索引本身作为
+   * 最后一道防线，真撞上了就重试一次换下一个号，双重保险。
+   */
+  private async generateCode(): Promise<string> {
     const today = new Date();
     const y = today.getFullYear();
     const m = String(today.getMonth() + 1).padStart(2, '0');
     const d = String(today.getDate()).padStart(2, '0');
     const prefix = `RK${y}${m}${d}`;
 
-    const start = new Date(y, today.getMonth(), today.getDate());
-    const end = new Date(y, today.getMonth(), today.getDate() + 1);
-    const countToday = await this.inboundModel.countDocuments({
-      createdAt: { $gte: start, $lt: end },
-    });
+    const todayRecords = await this.inboundModel
+      .find({ code: new RegExp(`^${prefix}\\d{3}$`) }, { code: 1 })
+      .sort({ code: -1 })
+      .limit(1);
 
-    return `${prefix}${String(countToday + 1).padStart(3, '0')}`;
+    const maxSeq = todayRecords.length ? Number(todayRecords[0].code.slice(-3)) : 0;
+    return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
   }
 }
 
