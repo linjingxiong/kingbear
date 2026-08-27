@@ -70,8 +70,12 @@ export class InboundService {
       }
     }
 
-    // 日期识别失败 → 默认当天
-    const inboundDate = ocrResult.date ? new Date(ocrResult.date) : new Date();
+    // 日期识别失败，或者识别出来的年份明显离谱（大模型偶尔会在单据没写清楚年份的时候
+    // 瞎猜一个，比如把"7月28日"猜成 2028 年）→ 默认当天。默认成今天而不是将错就错，
+    // 是故意的：今天的日期跟单据上手写的月/日对不上会很显眼，人一眼就看出来要手动改，
+    // 比一个"看着像真的"但其实是瞎猜的日期（比如 2028）更容易被忽略掉
+    const parsedDate = ocrResult.date ? new Date(ocrResult.date) : null;
+    const inboundDate = parsedDate && isPlausibleDate(parsedDate) ? parsedDate : new Date();
 
     // 每行：数量识别缺失就按公式算；两者都在就对比出差异
     const items = await Promise.all(
@@ -359,6 +363,17 @@ export class InboundService {
 
 function escapeRegExp(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** OCR 识别出来的日期是否靠谱：不是非法日期，年份也没有离今天太远（未来超过 30 天，
+ * 或者超过 5 年前）。入库单一般是当天或者近几天补录的，不会是几年前/几年后的单据 */
+function isPlausibleDate(date: Date): boolean {
+  if (Number.isNaN(date.getTime())) return false;
+  const now = new Date();
+  const maxFuture = new Date(now);
+  maxFuture.setDate(maxFuture.getDate() + 30);
+  const minPast = new Date(now.getFullYear() - 5, now.getMonth(), now.getDate());
+  return date <= maxFuture && date >= minPast;
 }
 
 /** 某一天的 [00:00, 次日00:00) 区间，用于按天比对是不是"同一天"入库的 */
