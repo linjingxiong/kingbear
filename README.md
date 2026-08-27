@@ -66,3 +66,28 @@ docker compose up -d --build
 - `mongo` 数据持久化在 `mongo_data` 卷
 
 局域网内其他电脑通过 `http://<部署机器的内网IP>` 访问即可，无需域名/证书。
+
+> ⚠️ **`mongo` 不要把端口发布到公网**：之前发布过 `27017:27017` 又没配 mongod 账号密码，
+> 结果被扫描工具连上去把整个库清空勒索过一次（详见 git 历史 `165e457` 那次修复）。
+> `mongo` 只需要给同一个 compose 网络里的 `server` 容器用，`docker-compose.yml` 里现在是
+> `expose`（只在容器网络内可见），不要为了"本机用工具连一下库"方便又改回 `ports` 映射。
+
+## 忘记管理员密码怎么办
+
+这是单管理员账号的系统，没有邮箱/短信找回那一套。改 `.env` 的 `ADMIN_PASSWORD` 对已经
+存在的账号不起作用（那个值只在 `users` 集合是空的时候，启动时自动建号才会用到）。
+要改已存在账号的密码，直接在数据库里改，脚本已经写好了：
+
+```bash
+# 把脚本拷进正在跑的 server 容器
+sudo docker cp apps/server/scripts/set-admin-password.mjs kingbear-git-server-1:/repo/apps/server/
+
+# 在容器里跑，改成想要的新密码
+sudo docker exec kingbear-git-server-1 sh -c \
+  'cd /repo/apps/server && MONGO_URI=mongodb://mongo:27017/kingbear node set-admin-password.mjs admin 新密码'
+
+# 跑完记得把临时拷进容器的脚本删掉
+sudo docker exec kingbear-git-server-1 rm /repo/apps/server/set-admin-password.mjs
+```
+
+容器名、`MONGO_URI` 如果你的部署跟 `docker-compose.yml` 里的服务名不一样，改成对应的即可。
