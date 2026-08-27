@@ -241,8 +241,18 @@ export class InboundService {
       const re = new RegExp(escapeRegExp(query.productName), 'i');
       rows = rows.filter((r) => r.name && re.test(r.name));
     }
-    if (query.amountMin != null) rows = rows.filter((r) => r.amount != null && r.amount >= query.amountMin!);
-    if (query.amountMax != null) rows = rows.filter((r) => r.amount != null && r.amount <= query.amountMax!);
+    // amount 是拿 qtyFinal × factoryPrice 现算的，浮点数乘法经常算出 1922.1599999999999
+    // 这种误差；前端传的是精确到分的数字，这里也按分取整再比较，不然"筛 1922.16"会因为
+    // 差了个几十亿分之一而筛不出本来该匹配的那一行
+    const toCents = (n: number) => Math.round(n * 100);
+    if (query.amountMin != null) {
+      const min = toCents(query.amountMin);
+      rows = rows.filter((r) => r.amount != null && toCents(r.amount) >= min);
+    }
+    if (query.amountMax != null) {
+      const max = toCents(query.amountMax);
+      rows = rows.filter((r) => r.amount != null && toCents(r.amount) <= max);
+    }
 
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;

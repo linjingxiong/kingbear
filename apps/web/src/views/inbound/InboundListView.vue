@@ -39,6 +39,15 @@ const query = reactive<Omit<SearchInboundQuery, "code" | "productName">>({
   pageSize: 20,
 });
 
+// 金额是精确匹配，不是区间——用户只填一个数；起止都设成这个值，复用后端已有的
+// amountMin/amountMax 筛选逻辑，不用再单独给后端加一套"精确等于"的参数
+const exactAmount = ref<number>();
+function onExactAmountChange() {
+  query.amountMin = exactAmount.value;
+  query.amountMax = exactAmount.value;
+  handleSearch();
+}
+
 const statusMeta: Record<InboundStatus, { text: string; type: "info" | "warning" | "success" }> = {
   [InboundStatus.Processing]: { text: "识别中", type: "info" },
   [InboundStatus.PendingConfirm]: { text: "待确认", type: "warning" },
@@ -175,10 +184,8 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item label="金额">
-          <el-input-number v-model="query.amountMin" :min="0" :precision="2" controls-position="right" placeholder="起" style="width: 120px" @change="handleSearch" />
-        </el-form-item>
-        <el-form-item label="至">
-          <el-input-number v-model="query.amountMax" :min="0" :precision="2" controls-position="right" placeholder="止" style="width: 120px" @change="handleSearch" />
+          <!-- 精确匹配，不是区间：起止都设成同一个值，复用后端已有的 amountMin/amountMax 筛选 -->
+          <el-input-number v-model="exactAmount" :min="0" :precision="2" controls-position="right" placeholder="精确金额" style="width: 140px" @change="onExactAmountChange" />
         </el-form-item>
         <el-form-item>
           <el-upload :show-file-list="false" accept="image/*" :http-request="customUpload" :disabled="uploading">
