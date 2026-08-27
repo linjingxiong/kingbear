@@ -47,9 +47,30 @@ function isBigQtyDiff(row: BillingDetailRow) {
   return hasBigQuantityDiff(row.qty, calculateQuantity(row.weightJin, row.unitWeightG));
 }
 
-// 小图标不够显眼，数量差异较大的这一整行都高亮，一眼就能扫到
+// 金额是 0 大概率是这个货号在产品管理里还没设工厂价，账单上这一行等于白算了，得提醒去补上
+function isZeroAmount(row: BillingDetailRow) {
+  return row.amount === 0;
+}
+
+// 同一天、同货号、同数量——极可能是同一批货被重复录入到账单里了（比如入库那边强行
+// 跳过了重复提醒）。这里拿全部明细（不受 tab 筛选影响）找一遍，出现次数 >1 的都标出来
+const duplicateRowCounts = computed(() => {
+  if (!summary.value) return new Map<string, number>();
+  const counts = new Map<string, number>();
+  for (const d of summary.value.details) {
+    const key = `${d.date}|${d.sku}|${d.qty}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+});
+
+function isDuplicateRow(row: BillingDetailRow) {
+  return (duplicateRowCounts.value.get(`${row.date}|${row.sku}|${row.qty}`) ?? 0) > 1;
+}
+
+// 小图标不够显眼，有问题的这一整行都高亮，一眼就能扫到；具体是哪种问题看各自列上的小图标提示
 function rowClassName({ row }: { row: BillingDetailRow }) {
-  return isBigQtyDiff(row) ? "qty-diff-row" : "";
+  return isBigQtyDiff(row) || isZeroAmount(row) || isDuplicateRow(row) ? "qty-diff-row" : "";
 }
 
 async function handleQuery() {
@@ -164,7 +185,14 @@ onMounted(async () => {
               <div class="statement-detail">
                 <el-table :data="filteredDetails" border size="small" height="100%" :row-class-name="rowClassName">
                   <el-table-column prop="date" label="日期" width="110" />
-                  <el-table-column prop="sku" label="货号" width="90" />
+                  <el-table-column label="货号" width="90">
+                    <template #default="{ row }">
+                      {{ row.sku }}
+                      <el-tooltip v-if="isDuplicateRow(row)" content="同一天、同货号、同数量的记录不止一条，疑似重复录入，请核对">
+                        <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
+                      </el-tooltip>
+                    </template>
+                  </el-table-column>
                   <!-- 名称固定宽度，太长就省略号+悬浮提示，不然名字一长整列被撑得很宽 -->
                   <el-table-column prop="name" label="名称" width="140" show-overflow-tooltip />
                   <el-table-column label="重量(斤)" width="90" align="right">
@@ -187,8 +215,13 @@ onMounted(async () => {
                   <el-table-column label="工厂价" width="90" align="right">
                     <template #default="{ row }">{{ row.factoryPrice.toFixed(4) }}</template>
                   </el-table-column>
-                  <el-table-column label="金额" width="100" align="right">
-                    <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
+                  <el-table-column label="金额" width="120" align="right">
+                    <template #default="{ row }">
+                      ¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}
+                      <el-tooltip v-if="isZeroAmount(row)" content="金额是 0，很可能是这个货号在产品管理里还没设工厂价，去补一下">
+                        <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
+                      </el-tooltip>
+                    </template>
                   </el-table-column>
                   <el-table-column label="附件" width="70" align="center">
                     <template #default="{ row }">
