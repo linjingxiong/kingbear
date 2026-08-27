@@ -8,7 +8,10 @@ import type { OcrProvider, OcrRawItem, OcrRawResult } from '../ocr.types';
 // https://help.aliyun.com/zh/model-studio/developer-reference/compatibility-of-openai-with-dashscope
 const DASHSCOPE_ENDPOINT = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
-const SYSTEM_PROMPT = `你是玩具加工厂的入库单据识别助手。用户会给你一张入库单据的照片，单据上一般包含：
+/** 每次调用都重新生成一遍，年份用的是"现在"，不会随着服务一直跑下去变成写死的老年份 */
+function buildSystemPrompt(): string {
+  const currentYear = new Date().getFullYear();
+  return `你是玩具加工厂的入库单据识别助手。用户会给你一张入库单据的照片，单据上一般包含：
 玩具厂名称、日期、若干行产品明细（货号、名称、重量(斤)、单个克重(g)、数量）。
 
 请你识别图片内容，只输出一个 JSON 对象，不要输出任何解释性文字、不要用 markdown 代码块包裹，格式如下：
@@ -18,7 +21,7 @@ const SYSTEM_PROMPT = `你是玩具加工厂的入库单据识别助手。用户
   "date": "入库日期，格式 yyyy-MM-dd，识别不到给 null",
   "items": [
     {
-      "sku": "货号，只填编号本身（通常是纯数字或字母数字），旁边如果写了\"成品\"\"半成品\"这类描述词，不要带进货号里",
+      "sku": "货号，只填编号本身（通常是纯数字或字母数字），旁边如果写了\\"成品\\"\\"半成品\\"这类描述词，不要带进货号里",
       "name": "产品名称",
       "weightJin": 重量数字（单位：斤，纯数字不带单位）,
       "unitWeightG": 单个克重数字（单位：克，纯数字不带单位）,
@@ -34,10 +37,12 @@ const SYSTEM_PROMPT = `你是玩具加工厂的入库单据识别助手。用户
   里——这类词要么单独归到 name 里，要么直接忽略，不然货号会跟产品库里存的对不上
 - 日期年份如果单据上只写了两位数字（比如"26年8月2日"），一律理解成 20xx 年（"26年"就是
   2026 年），不要凭空猜成别的年份；月、日也是同理，照单据上写的数字来，不要自己改
-- 单据上如果压根没写年份（比如只写了"7月28日"，连两位数字的年份都没有），date 就只把
-  能确定的部分定下来、年份部分不要瞎猜——这种情况直接把整个 date 字段给 null，宁可让人工
-  自己选日期，也不要编一个看着像真的、但其实是猜的年份出来
+- 单据上如果压根没写年份（比如只写了"7月28日"，连两位数字的年份都没有），年份就按 ${currentYear}
+  年来填，月、日照单据上写的数字来——不要因为年份不确定就把整个 date 字段扔掉，月、日这些
+  能看清的信息不能因为年份不确定就一起丢了，人工确认页看到年份不对，改一下年份比把月、日
+  重新翻回单据上核对一遍要省事得多
 - 完全看不清或者不是入库单据的情况下，factoryName/date 给 null，items 给空数组`;
+}
 
 /** 通义千问 VL（阿里云 DashScope）的 OCR Provider 实现 */
 @Injectable()
@@ -66,7 +71,7 @@ export class QwenVlOcrProvider implements OcrProvider {
         body: JSON.stringify({
           model,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: buildSystemPrompt() },
             {
               role: 'user',
               content: [
