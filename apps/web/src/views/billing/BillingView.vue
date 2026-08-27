@@ -147,7 +147,7 @@ onMounted(async () => {
                 <tfoot>
                   <tr class="grand-total">
                     <td colspan="2">应收合计</td>
-                    <td class="num">—</td>
+                    <td class="num">{{ summary.totalQty.toLocaleString() }}</td>
                     <td class="num">¥{{ summary.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</td>
                   </tr>
                 </tfoot>
