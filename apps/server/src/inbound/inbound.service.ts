@@ -211,7 +211,7 @@ export class InboundService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
 
-    const [list, total] = await Promise.all([
+    const [records, total] = await Promise.all([
       this.inboundModel
         .find(filter)
         .sort({ inboundDate: -1, createdAt: -1 })
@@ -220,7 +220,39 @@ export class InboundService {
       this.inboundModel.countDocuments(filter),
     ]);
 
+    const list = await this.withLivePrices(records);
     return { list, total, page, pageSize };
+  }
+
+  /**
+   * 入库单列表里的金额跟应收账单一样，不用入库确认时存死的工厂价快照，改成实时读
+   * 产品档案当前的价格——不然产品价格是后来才补录/改的，这个列表看着金额还是 0，
+   * 跟应收账单那边（已经是实时读取）对不上，容易让人以为是账单算错了。只是展示层面
+   * 覆盖一下，不改数据库里存的历史快照。
+   */
+  private async withLivePrices(records: InboundRecord[]) {
+    const factoryIds = [...new Set(records.map((r) => r.factoryId).filter(Boolean).map(String))];
+    const priceMaps = new Map<string, Map<string, number>>();
+    await Promise.all(
+      factoryIds.map(async (factoryId) => {
+        const products = await this.productService.findByFactory(factoryId);
+        priceMaps.set(factoryId, new Map(products.map((p) => [p.sku, p.factoryPrice])));
+      }),
+    );
+
+    return records.map((record) => {
+      // 用 toJSON() 不用 toObject()：toJSON 才会走 idTransformPlugin 那个全局转换
+      // （_id → id 字符串、去掉 __v），toObject 拿到的是原始 Mongoose 内部结构，
+      // 前端认的是 id，用错方法这里会悄悄把整个列表的 id 字段丢没
+      const plain = record.toJSON();
+      const priceMap = record.factoryId ? priceMaps.get(String(record.factoryId)) : undefined;
+      plain.items = plain.items.map((item) => {
+        const livePrice = priceMap?.get(item.sku);
+        if (livePrice === undefined) return item;
+        return { ...item, factoryPrice: livePrice, amount: item.qtyFinal * livePrice };
+      });
+      return plain;
+    });
   }
 
   async findOne(id: string) {
