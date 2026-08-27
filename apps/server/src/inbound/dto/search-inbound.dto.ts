@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsMongoId, IsOptional, IsString, IsInt, Min } from 'class-validator';
+import { IsDateString, IsMongoId, IsOptional, IsString, IsInt, IsNumber, Min } from 'class-validator';
 
 export class SearchInboundDto {
   @IsOptional()
@@ -25,6 +25,18 @@ export class SearchInboundDto {
   @IsOptional()
   @IsString()
   code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amountMin?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amountMax?: number;
 
   @IsOptional()
   @Type(() => Number)

@@ -82,6 +82,31 @@ export interface SearchInboundQuery {
   productName?: string;
   sku?: string;
   code?: string;
+  /** 加工金额区间筛选（按货号拆开后每一行自己的金额，不是整单合计） */
+  amountMin?: number;
+  amountMax?: number;
   page?: number;
   pageSize?: number;
+}
+
+/**
+ * 入库管理列表现在是按货号拆开、一行一个货号地展示（不是一整条入库单塞好几个货号），
+ * 所以列表接口直接返回拆好的行，筛选/分页也是按这个粒度来的——不然"筛金额"这种
+ * 只针对某一行的条件没法跟"按入库单分页"对得上。没有货号明细的单据（识别中/待确认，
+ * items 还是空的）sku 等字段就是 null，占一行不会凭空消失。
+ */
+export interface InboundListRow {
+  recordId: string;
+  code: string;
+  factoryId: string | null;
+  needFactorySelect: boolean;
+  inboundDate: string;
+  status: InboundStatus;
+  sku: string | null;
+  name: string | null;
+  weightJin: number | null;
+  unitWeightG: number | null;
+  qtyFinal: number | null;
+  factoryPrice: number | null;
+  amount: number | null;
 }

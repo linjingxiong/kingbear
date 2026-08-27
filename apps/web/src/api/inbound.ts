@@ -1,4 +1,4 @@
-import type { ConfirmInboundDto, InboundRecord, SearchInboundQuery } from "@kingbear/shared";
+import type { ConfirmInboundDto, InboundListRow, InboundRecord, SearchInboundQuery } from "@kingbear/shared";
 import request from "./request";
 
 export function uploadInboundImage(file: File, force = false) {
@@ -29,7 +29,7 @@ export function updateInbound(id: string, dto: ConfirmInboundDto) {
 }
 
 export function searchInbound(query: SearchInboundQuery) {
-  return request.get<never, { list: InboundRecord[]; total: number; page: number; pageSize: number }>(
+  return request.get<never, { list: InboundListRow[]; total: number; page: number; pageSize: number }>(
     "/inbound",
     { params: query },
   );

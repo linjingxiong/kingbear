@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { AnyKeys, FilterQuery, Model, Types } from 'mongoose';
 import { createHash } from 'crypto';
 import { readFile } from 'fs/promises';
-import { InboundStatus, QuantitySource, type DuplicateConflictResponse } from '@kingbear/shared';
+import { InboundStatus, QuantitySource, type DuplicateConflictResponse, type InboundListRow } from '@kingbear/shared';
 import { InboundRecord } from './schemas/inbound-record.schema';
 import { ConfirmInboundDto } from './dto/confirm-inbound.dto';
 import { SearchInboundDto } from './dto/search-inbound.dto';
@@ -197,6 +197,13 @@ export class InboundService {
     return this.confirm(id, dto);
   }
 
+  /**
+   * 列表按货号拆开、一行一个货号地展示（跟前端表格的粒度一致），筛选/分页也是按这个粒度
+   * 来的——货号、金额这些条件本来就是针对某一行的，不是针对整条入库单的。金额还是实时
+   * 算出来的（见 withLivePrices），没法直接拿 Mongo 查询过滤，所以这里是先按玩具厂/
+   * 入库单号/日期这些"整单"条件圈一批记录出来，再在内存里拆行、按货号/产品名称/金额
+   * 这些"单行"条件筛一遍，最后再分页。数据量不大（单用户内部工具），这样做没有性能问题。
+   */
   async findAll(query: SearchInboundDto) {
     const filter: FilterQuery<InboundRecord> = {};
     if (query.factoryId) filter.factoryId = new Types.ObjectId(query.factoryId);
@@ -206,22 +213,42 @@ export class InboundService {
       if (query.dateFrom) filter.inboundDate.$gte = new Date(query.dateFrom);
       if (query.dateTo) filter.inboundDate.$lte = new Date(query.dateTo);
     }
-    if (query.productName) filter['items.name'] = new RegExp(escapeRegExp(query.productName), 'i');
-    if (query.sku) filter['items.sku'] = new RegExp(escapeRegExp(query.sku), 'i');
+
+    const records = await this.inboundModel.find(filter).sort({ inboundDate: -1, createdAt: -1 });
+    const priced = await this.withLivePrices(records);
+
+    let rows: InboundListRow[] = priced.flatMap((record) => {
+      const items = record.items.length ? record.items : [null];
+      return items.map((item) => ({
+        recordId: record.id,
+        code: record.code,
+        factoryId: record.factoryId ? String(record.factoryId) : null,
+        needFactorySelect: record.needFactorySelect,
+        inboundDate: record.inboundDate,
+        status: record.status,
+        sku: item?.sku ?? null,
+        name: item?.name ?? null,
+        weightJin: item?.weightJin ?? null,
+        unitWeightG: item?.unitWeightG ?? null,
+        qtyFinal: item?.qtyFinal ?? null,
+        factoryPrice: item?.factoryPrice ?? null,
+        amount: item?.amount ?? null,
+      }));
+    });
+
+    if (query.sku) rows = rows.filter((r) => r.sku === query.sku);
+    if (query.productName) {
+      const re = new RegExp(escapeRegExp(query.productName), 'i');
+      rows = rows.filter((r) => r.name && re.test(r.name));
+    }
+    if (query.amountMin != null) rows = rows.filter((r) => r.amount != null && r.amount >= query.amountMin!);
+    if (query.amountMax != null) rows = rows.filter((r) => r.amount != null && r.amount <= query.amountMax!);
 
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
+    const total = rows.length;
+    const list = rows.slice((page - 1) * pageSize, page * pageSize);
 
-    const [records, total] = await Promise.all([
-      this.inboundModel
-        .find(filter)
-        .sort({ inboundDate: -1, createdAt: -1 })
-        .skip((page - 1) * pageSize)
-        .limit(pageSize),
-      this.inboundModel.countDocuments(filter),
-    ]);
-
-    const list = await this.withLivePrices(records);
     return { list, total, page, pageSize };
   }
 
