@@ -10,8 +10,9 @@ const route = useRoute();
 const userStore = useUserStore();
 
 const formRef = ref<FormInstance>();
-// 默认填好账号密码，方便自己测试登录；正式给别人用之前记得把这两行去掉
-const form = reactive({ username: "admin", password: "admin123" });
+// 之前这里默认填了真实账号密码方便自测，代码是要推到 GitHub 的，等于把密码明文提交上去了——
+// 上次数据库被扫到攻击、教训还历历在目，不能再把凭据留在代码里，去掉
+const form = reactive({ username: "", password: "" });
 const loading = ref(false);
 
 const rules = {
