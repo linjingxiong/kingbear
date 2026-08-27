@@ -4,8 +4,12 @@ services:
     restart: unless-stopped
     volumes:
       - mongo_data:/data/db
-    ports:
-      - "27017:27017"
+    # 之前这里把 27017 直接发布到公网、又没配 mongod 账号密码，等于谁都能连上来
+    # 随便读写删——已经因为这个被人拿工具扫到、把库全清空勒索过一次了。mongo 只需要
+    # 给同一个 compose 网络里的 server 容器用（内部走服务名 mongo:27017 就能连上），
+    # 不需要暴露给宿主机/公网，所以直接去掉端口映射，不再对外开放
+    expose:
+      - "27017"
 
   server:
     build:
