@@ -282,8 +282,8 @@ onMounted(async () => {
   width: 108px;
   height: 108px;
   border-radius: 50%;
-  border: 3px solid #c0392b;
-  box-shadow: 0 0 0 3px #c0392b inset, 0 0 0 6px rgba(192, 57, 43, 0.35) inset;
+  border: 3px solid #2e7d32;
+  box-shadow: 0 0 0 3px #2e7d32 inset, 0 0 0 6px rgba(46, 125, 50, 0.35) inset;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -296,7 +296,7 @@ onMounted(async () => {
 }
 
 .paid-stamp-text {
-  color: #c0392b;
+  color: #2e7d32;
   font-size: 21px;
   font-weight: 900;
   letter-spacing: 3px;
