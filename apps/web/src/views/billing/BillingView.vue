@@ -118,13 +118,19 @@ onMounted(async () => {
       <div class="statement-title">
         <h2>应收对账单</h2>
         <div v-if="summary" class="statement-actions">
-          <el-tag :type="summary.status === 'paid' ? 'success' : 'warning'" size="large">
-            {{ summary.status === "paid" ? "已收款" : "未收款" }}
-          </el-tag>
+          <!-- 未收款还是用普通标签，一眼看出"还没处理"；已收款要的是那种正式单据盖了
+               红章的感觉，一眼就笃定"这笔完事了"，所以单独做成印章样式，不再用小标签 -->
+          <el-tag v-if="summary.status !== 'paid'" type="warning" size="large">未收款</el-tag>
           <el-button link type="primary" @click="togglePaymentStatus">
             标记为{{ summary.status === "paid" ? "未收款" : "已收款" }}
           </el-button>
         </div>
+      </div>
+
+      <!-- 已收款：盖一个红色印章上去，位置压在标题区右上角，跟真实单据盖章的感觉一样，
+           比一个小标签显眼太多，一眼就能确认这笔钱收没收 -->
+      <div v-if="summary && summary.status === 'paid'" class="paid-stamp">
+        <span class="paid-stamp-text">已收款</span>
       </div>
 
       <div class="statement-meta">
@@ -262,6 +268,52 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 印章是绝对定位盖在这张卡片上的，卡片本身要立起定位上下文 */
+  position: relative;
+  overflow: hidden;
+}
+
+/* 红色印章：双层圆圈 + 旋转 + 半透明，模拟盖在纸质单据上的实体章。
+   压在卡片右上角，跟标题区略微重叠，才有"盖上去"的感觉，不是摆在旁边的装饰 */
+.paid-stamp {
+  position: absolute;
+  top: 4px;
+  right: 32px;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  border: 3px solid #c0392b;
+  box-shadow: 0 0 0 3px #c0392b inset, 0 0 0 6px rgba(192, 57, 43, 0.35) inset;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-16deg);
+  opacity: 0.82;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 5;
+  animation: stamp-in 0.25s ease-out;
+}
+
+.paid-stamp-text {
+  color: #c0392b;
+  font-size: 21px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  writing-mode: horizontal-tb;
+  text-align: center;
+  line-height: 1.3;
+}
+
+@keyframes stamp-in {
+  from {
+    opacity: 0;
+    transform: rotate(-16deg) scale(1.6);
+  }
+  to {
+    opacity: 0.82;
+    transform: rotate(-16deg) scale(1);
+  }
 }
 
 .statement-card :deep(.el-card__body) {
