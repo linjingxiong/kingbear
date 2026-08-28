@@ -127,12 +127,6 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- 已收款：盖一个红色印章上去，位置压在标题区右上角，跟真实单据盖章的感觉一样，
-           比一个小标签显眼太多，一眼就能确认这笔钱收没收 -->
-      <div v-if="summary && summary.status === 'paid'" class="paid-stamp">
-        <span class="paid-stamp-text">已收款</span>
-      </div>
-
       <div class="statement-meta">
         <el-form inline class="meta-form">
           <el-form-item label="玩具厂">
@@ -154,6 +148,12 @@ onMounted(async () => {
                不随右边的 tab 切换变化——不管在看哪个货号的流水，应收合计都是同一个数 -->
           <div class="statement-row">
             <div class="statement-summary">
+              <!-- 已收款：盖一个绿色印章上去，就压在"应收合计"这张单据卡片的右上角，
+                   跟真实单据盖章在纸面上的感觉一样——之前放在页面标题区，旁边一大片
+                   空白，看着像个孤立的装饰，不像盖在账单上 -->
+              <div v-if="summary && summary.status === 'paid'" class="paid-stamp">
+                <span class="paid-stamp-text">已收款</span>
+              </div>
               <table class="summary-table">
                 <thead>
                   <tr>
@@ -268,22 +268,20 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* 印章是绝对定位盖在这张卡片上的，卡片本身要立起定位上下文 */
-  position: relative;
-  overflow: hidden;
 }
 
-/* 红色印章：双层圆圈 + 旋转 + 半透明，模拟盖在纸质单据上的实体章。
-   压在卡片右上角，跟标题区略微重叠，才有"盖上去"的感觉，不是摆在旁边的装饰 */
+/* 绿色印章：双层圆圈 + 旋转 + 半透明，模拟盖在纸质单据上的实体章。挂在"应收合计"
+   这张单据卡片的右上角、往外探出去一点，是真的"盖在单子上"，不是摆在页面标题区
+   旁边一片空白里当装饰 */
 .paid-stamp {
   position: absolute;
-  top: 4px;
-  right: 32px;
-  width: 108px;
-  height: 108px;
+  top: -16px;
+  right: -16px;
+  width: 84px;
+  height: 84px;
   border-radius: 50%;
-  border: 3px solid #2e7d32;
-  box-shadow: 0 0 0 3px #2e7d32 inset, 0 0 0 6px rgba(46, 125, 50, 0.35) inset;
+  border: 2.5px solid #2e7d32;
+  box-shadow: 0 0 0 2px #2e7d32 inset, 0 0 0 4.5px rgba(46, 125, 50, 0.35) inset;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -297,9 +295,9 @@ onMounted(async () => {
 
 .paid-stamp-text {
   color: #2e7d32;
-  font-size: 21px;
+  font-size: 16px;
   font-weight: 900;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
   writing-mode: horizontal-tb;
   text-align: center;
   line-height: 1.3;
@@ -386,6 +384,8 @@ onMounted(async () => {
   border-radius: 6px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
   box-sizing: border-box;
+  /* 印章绝对定位盖在这张"应收合计"单据卡片上，要靠这个立定位上下文 */
+  position: relative;
 }
 
 /* 明细这一侧（tab + 表格）占满剩下的宽度，同时纵向也是 tab 固定、表格吃掉剩下的高度 */
