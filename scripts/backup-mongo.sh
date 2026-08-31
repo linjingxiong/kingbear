@@ -19,12 +19,16 @@ FILE="$BACKUP_DIR/kingbear-$TS.archive.gz"
 
 mkdir -p "$BACKUP_DIR"
 
+# docker exec 失败时 shell 重定向仍会先建出一个空文件，失败就顺手删掉，不留垃圾文件
+trap 'rm -f "$FILE"' ERR
+
 docker exec "$CONTAINER" mongodump --db="$DB_NAME" --archive --gzip > "$FILE"
 
 # 简单校验一下：文件太小大概率是导出失败了（比如容器没起来），报错但不动之前已有的备份
 SIZE=$(stat -c%s "$FILE" 2>/dev/null || stat -f%z "$FILE" 2>/dev/null || echo 0)
 if [ "$SIZE" -lt 1024 ]; then
   echo "[backup-mongo] 警告：备份文件异常小（${SIZE} 字节），可能导出失败：$FILE" >&2
+  rm -f "$FILE"
   exit 1
 fi
 
