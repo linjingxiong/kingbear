@@ -72,6 +72,41 @@ docker compose up -d --build
 > `mongo` 只需要给同一个 compose 网络里的 `server` 容器用，`docker-compose.yml` 里现在是
 > `expose`（只在容器网络内可见），不要为了"本机用工具连一下库"方便又改回 `ports` 映射。
 
+## 数据库备份
+
+之前被勒索软件清空过一次数据（见上面那条端口安全警告），光靠"以后不犯这个错"不够
+可靠——误操作、脚本写错、磁盘故障都可能导致数据丢失，必须有独立的备份能拿回来。
+
+`scripts/backup-mongo.sh` 用 `mongodump` 把整个库导出压缩包，存到宿主机上一个跟
+`mongo_data` 这个 docker volume**完全无关**的目录（默认 `~/kingbear-backups`）——备份
+不能跟数据库本体绑在一起，容器/卷被删的话备份也要跟着没了，那就白备份了。默认保留
+最近 14 天，超期自动清理，不会一直攒到把硬盘占满。
+
+部署机器上配置每天定时自动备份（一次即可，不用每次部署都重新配）：
+
+```bash
+chmod +x scripts/backup-mongo.sh scripts/restore-mongo.sh
+
+# 手动跑一次，确认能正常导出
+./scripts/backup-mongo.sh
+
+# 配 cron，每天凌晨 3 点自动跑一次
+(crontab -l 2>/dev/null; echo "0 3 * * * cd $(pwd) && ./scripts/backup-mongo.sh >> $HOME/kingbear-backups/backup.log 2>&1") | crontab -
+```
+
+需要恢复的时候：
+
+```bash
+./scripts/restore-mongo.sh ~/kingbear-backups/kingbear-20260831-030000.archive.gz
+```
+
+会先清空当前数据库里的集合，再导入备份里的数据，操作前脚本会让你二次确认。
+
+> 这份备份只解决"服务器本身没炸、但数据被误删/写坏"的情况。真要做到万无一失，
+> 最好再定期把 `~/kingbear-backups` 里的文件同步一份到服务器之外（比如自己的电脑，
+> 或者对象存储），不然整台服务器出问题（磁盘损坏、被删、欠费回收）的话本地备份
+> 也会一起没了。第一版先把本地这一层做扎实，异地备份按需再加。
+
 ## 忘记管理员密码怎么办
 
 这是单管理员账号的系统，没有邮箱/短信找回那一套。改 `.env` 的 `ADMIN_PASSWORD` 对已经
