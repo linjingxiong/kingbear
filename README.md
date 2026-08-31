@@ -102,10 +102,46 @@ chmod +x scripts/backup-mongo.sh scripts/restore-mongo.sh
 
 会先清空当前数据库里的集合，再导入备份里的数据，操作前脚本会让你二次确认。
 
-> 这份备份只解决"服务器本身没炸、但数据被误删/写坏"的情况。真要做到万无一失，
-> 最好再定期把 `~/kingbear-backups` 里的文件同步一份到服务器之外（比如自己的电脑，
-> 或者对象存储），不然整台服务器出问题（磁盘损坏、被删、欠费回收）的话本地备份
-> 也会一起没了。第一版先把本地这一层做扎实，异地备份按需再加。
+### 异地备份：同步到 GitHub
+
+本地备份解决"误删/脚本写错"，但服务器本身出问题（磁盘坏、被删、欠费回收）的话本地
+备份会一起没，所以每次备份还会额外导出一份（不含 `users` 集合，那里面是管理员密码
+的哈希，没必要公开）推到这个仓库的 `backups` 分支——这个仓库当前是 **public
+仓库，这份数据是公开的**，是权衡过"简单、不用管密钥密码"之后做出的明确决定，
+不是默认推荐做法；如果这个仓库以后改成 private，这一步不用改就自动跟着变成私有。
+
+首次配置（只需要在部署机器上做一次）：
+
+```bash
+# 1. 生成专用的部署密钥（只给这一个仓库推送用，不是账号密码）
+ssh-keygen -t ed25519 -f ~/.ssh/kingbear_backup_deploy_key -N '' -C 'kingbear-backup-deploy-key'
+cat ~/.ssh/kingbear_backup_deploy_key.pub
+```
+
+把打印出来的公钥加到 GitHub 仓库 Settings → Deploy keys → Add deploy key，**勾选
+"Allow write access"**。然后：
+
+```bash
+cat >> ~/.ssh/config << 'EOF'
+
+Host github-kingbear-backup
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/kingbear_backup_deploy_key
+  IdentitiesOnly yes
+EOF
+
+# 2. 建一个单独的 clone，切到孤立的 backups 分支（不带 main 的代码提交历史）
+git clone --branch main --single-branch https://github.com/linjingxiong/kingbear.git ~/kingbear-backups-git
+cd ~/kingbear-backups-git
+git remote set-url origin git@github-kingbear-backup:linjingxiong/kingbear.git
+git checkout --orphan backups && git rm -rf . && mkdir backups
+git commit --allow-empty -m init && git push -u origin backups
+```
+
+配好之后 `backup-mongo.sh` 每次跑都会自动把最新一份（去掉 `users`）提交推送到这个
+分支，不需要再手动干预。`~/kingbear-backups-git` 不存在的话这一步会跳过，只做
+本地备份，不会报错。
 
 ## 忘记管理员密码怎么办
 
