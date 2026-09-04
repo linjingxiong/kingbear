@@ -105,10 +105,15 @@ async function togglePaymentStatus() {
   handleQuery();
 }
 
-// 导出当前对账单（这个玩具厂 + 这个账期）为 Excel：汇总一个 sheet，完整明细流水
-// 另一个 sheet——明细导出的是整月全部流水，不受右边货号 tab 筛选影响，因为导出的
-// 是"这张对账单"，不是"当前正在看的这一屏"。异常提示列把页面上用标红/图标提示的
-// 三种问题（数量对不上、金额为0、疑似重复）文字化带出去，导出后脱离页面也能看出来
+// Excel sheet 名不能带 \ / ? * [ ] : 这几个字符，超过 31 字符会被截断报错，这里统一处理一下
+function toSheetName(name: string) {
+  return name.replace(/[\\/?*[\]:]/g, "-").slice(0, 31);
+}
+
+// 导出当前对账单（这个玩具厂 + 这个账期）为 Excel：一个"汇总" sheet，
+// 后面每个货号单独一个明细 sheet（不受页面右边 tab 当前选的是哪个货号影响，
+// 导出的是"这张对账单"完整数据）。明细不带工厂价、不带异常提示列，
+// 跟原来手工做的台账格式对齐
 function exportExcel() {
   if (!summary.value) return;
   const s = summary.value;
@@ -119,30 +124,24 @@ function exportExcel() {
     ["应收合计", "", s.totalQty, s.totalAmount],
   ];
 
-  const detailRows = [
-    ["日期", "货号", "名称", "重量(斤)", "单个克重(g)", "出货数量", "工厂价", "金额", "异常提示"],
-    ...s.details.map((row) => {
-      const flags: string[] = [];
-      if (isBigQtyDiff(row)) flags.push("数量与重量不符");
-      if (isZeroAmount(row)) flags.push("金额为0(未设工厂价)");
-      if (isDuplicateRow(row)) flags.push("疑似重复录入");
-      return [
-        row.date,
-        row.sku,
-        row.name,
-        row.weightJin,
-        row.unitWeightG,
-        row.qty,
-        row.factoryPrice,
-        row.amount,
-        flags.join("；"),
-      ];
-    }),
-  ];
-
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "汇总");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailRows), "明细");
+
+  const usedNames = new Set<string>(["汇总"]);
+  for (const sku of s.bySku) {
+    const detailRows = [
+      ["时间", "名称", "重量/斤", "克重/g", "出货数量", "金额"],
+      ...s.details
+        .filter((row) => row.sku === sku.sku)
+        .map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount]),
+    ];
+    let sheetName = toSheetName(`${sku.sku}${sku.name}`);
+    // 货号+名称截断后偶尔会撞名，撞了就退化成只用货号，货号本身在 bySku 里是唯一的
+    if (usedNames.has(sheetName)) sheetName = toSheetName(sku.sku);
+    usedNames.add(sheetName);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailRows), sheetName);
+  }
+
   XLSX.writeFile(wb, `对账单_${s.factoryName}_${s.yearMonth}.xlsx`);
 }
 
