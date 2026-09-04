@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import dayjs from "dayjs";
+import * as XLSX from "xlsx";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   BillPaymentStatus,
@@ -104,6 +105,47 @@ async function togglePaymentStatus() {
   handleQuery();
 }
 
+// 导出当前对账单（这个玩具厂 + 这个账期）为 Excel：汇总一个 sheet，完整明细流水
+// 另一个 sheet——明细导出的是整月全部流水，不受右边货号 tab 筛选影响，因为导出的
+// 是"这张对账单"，不是"当前正在看的这一屏"。异常提示列把页面上用标红/图标提示的
+// 三种问题（数量对不上、金额为0、疑似重复）文字化带出去，导出后脱离页面也能看出来
+function exportExcel() {
+  if (!summary.value) return;
+  const s = summary.value;
+
+  const summaryRows = [
+    ["货号", "名称", "出货数量", "金额"],
+    ...s.bySku.map((row) => [row.sku, row.name, row.qty, row.amount]),
+    ["应收合计", "", s.totalQty, s.totalAmount],
+  ];
+
+  const detailRows = [
+    ["日期", "货号", "名称", "重量(斤)", "单个克重(g)", "出货数量", "工厂价", "金额", "异常提示"],
+    ...s.details.map((row) => {
+      const flags: string[] = [];
+      if (isBigQtyDiff(row)) flags.push("数量与重量不符");
+      if (isZeroAmount(row)) flags.push("金额为0(未设工厂价)");
+      if (isDuplicateRow(row)) flags.push("疑似重复录入");
+      return [
+        row.date,
+        row.sku,
+        row.name,
+        row.weightJin,
+        row.unitWeightG,
+        row.qty,
+        row.factoryPrice,
+        row.amount,
+        flags.join("；"),
+      ];
+    }),
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "汇总");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailRows), "明细");
+  XLSX.writeFile(wb, `对账单_${s.factoryName}_${s.yearMonth}.xlsx`);
+}
+
 onMounted(async () => {
   await loadFactories();
   if (factoryId.value) handleQuery();
@@ -121,6 +163,9 @@ onMounted(async () => {
           <!-- 未收款还是用普通标签，一眼看出"还没处理"；已收款要的是那种正式单据盖了
                红章的感觉，一眼就笃定"这笔完事了"，所以单独做成印章样式，不再用小标签 -->
           <el-tag v-if="summary.status !== 'paid'" type="warning" size="large">未收款</el-tag>
+          <el-button v-if="summary.bySku.length" link type="primary" @click="exportExcel">
+            导出Excel
+          </el-button>
           <el-button link type="primary" @click="togglePaymentStatus">
             标记为{{ summary.status === "paid" ? "未收款" : "已收款" }}
           </el-button>
