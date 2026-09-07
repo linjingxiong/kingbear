@@ -14,6 +14,8 @@ interface LiveItem {
   name: string;
   qtyFinal: number;
   amount: number;
+  /** 所属入库单的日期，格式 YYYY-MM-DD——按天分组统计（近7天产能）要用 */
+  date: string;
 }
 
 @Injectable()
@@ -30,19 +32,24 @@ export class DashboardService {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    // 近7天：含今天在内往前数7天，不是自然周（周一到周日），"7天内"这种说法平时都是
+    // 指滚动窗口，跟自然周对不上的话每周一都会有一天数据"消失"，观感很奇怪
+    const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const [todayRecords, monthRecords] = await Promise.all([
+    const [todayRecords, weekRecords, monthRecords] = await Promise.all([
       this.findCompleted(todayStart, todayEnd),
+      this.findCompleted(weekStart, todayEnd),
       this.findCompleted(monthStart, monthEnd),
     ]);
-    // 首页这几块统计（今日/本月/玩具厂排行/按货号明细/未收款）全都基于同一份"本月已完成
-    // 记录 + 实时产品价格"算出来的明细行，跟应收账单、入库管理列表用的是同一个口径，
-    // 不会出现"首页说 8 万、账单说 9 万"这种同一个数字两个地方对不上的情况
-    const [todayItems, monthItems] = await Promise.all([
+    // 首页这几块统计（今日/近7天/本月/玩具厂排行/按货号明细/未收款）全都基于同一份
+    // "已完成记录 + 实时产品价格"算出来的明细行，跟应收账单、入库管理列表用的是同一个
+    // 口径，不会出现"首页说 8 万、账单说 9 万"这种同一个数字两个地方对不上的情况
+    const [todayItems, weekItems, monthItems] = await Promise.all([
       this.withLivePrices(todayRecords),
+      this.withLivePrices(weekRecords),
       this.withLivePrices(monthRecords),
     ]);
 
@@ -57,6 +64,12 @@ export class DashboardService {
         inboundCount: todayRecords.length,
         processedQty: sumQty(todayItems),
         processedAmount: sumAmount(todayItems),
+      },
+      week: {
+        processedQty: sumQty(weekItems),
+        processedAmount: sumAmount(weekItems),
+        inboundCount: weekRecords.length,
+        daily: this.groupByDay(weekItems, weekStart),
       },
       month: {
         processedAmount: sumAmount(monthItems),
@@ -92,6 +105,7 @@ export class DashboardService {
     return records.flatMap((r) => {
       const factoryId = r.factoryId ? String(r.factoryId) : null;
       const priceMap = factoryId ? priceMaps.get(factoryId) : undefined;
+      const date = formatDate(r.inboundDate);
       return r.items.map((item) => {
         const factoryPrice = priceMap?.get(item.sku) ?? item.factoryPrice;
         return {
@@ -100,8 +114,27 @@ export class DashboardService {
           name: item.name,
           qtyFinal: item.qtyFinal,
           amount: item.qtyFinal * factoryPrice,
+          date,
         };
       });
+    });
+  }
+
+  /** 近7天产能：按天把数量/金额加起来，凑不满7天的日子补0，不是缺项，前端画趋势要用连续的7条 */
+  private groupByDay(weekItems: LiveItem[], weekStart: Date) {
+    const byDate = new Map<string, { qty: number; amount: number }>();
+    for (const item of weekItems) {
+      const bucket = byDate.get(item.date) ?? { qty: 0, amount: 0 };
+      bucket.qty += item.qtyFinal;
+      bucket.amount += item.amount;
+      byDate.set(item.date, bucket);
+    }
+
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i);
+      const date = formatDate(d);
+      const bucket = byDate.get(date);
+      return { date, qty: bucket?.qty ?? 0, amount: bucket?.amount ?? 0 };
     });
   }
 
@@ -177,6 +210,10 @@ export class DashboardService {
       .filter(([factoryId]) => !paidFactoryIds.has(factoryId))
       .reduce((sum, [, amount]) => sum + amount, 0);
   }
+}
+
+function formatDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function sumQty(items: LiveItem[]) {

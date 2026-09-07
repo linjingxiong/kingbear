@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
+import dayjs from "dayjs";
 import type { DashboardOverview } from "@kingbear/shared";
 import { getDashboardOverview } from "../../api/dashboard";
 // 直接把完整的应收账单页面嵌进首页，不用再跳转过去——首页往下滚就是它，
@@ -19,6 +20,24 @@ async function load() {
 }
 
 onMounted(load);
+
+// 近7天每天的加工数量条形图，用纯 CSS 画（不引入图表库）：每天的宽度是当天数量占
+// 这7天里最大那天的百分比，最大那天始终画满，方便一眼看出节奏是升是降
+const maxDailyQty = computed(() => {
+  if (!overview.value) return 0;
+  return Math.max(1, ...overview.value.week.daily.map((d) => d.qty));
+});
+
+function barWidth(qty: number) {
+  return `${(qty / maxDailyQty.value) * 100}%`;
+}
+
+// 不引入 dayjs 的中文 locale（怕影响其它页面已经在用的默认英文 locale），
+// 星期几直接手动映射
+const WEEKDAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
+function weekdayLabel(date: string) {
+  return `${dayjs(date).format("MM-DD")} 周${WEEKDAY_NAMES[dayjs(date).day()]}`;
+}
 </script>
 
 <template>
@@ -67,6 +86,43 @@ onMounted(load);
                 <div class="stat-value warn">¥{{ overview.month.unpaidAmount.toFixed(2) }}</div>
               </el-col>
             </el-row>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 近7天产能：滚动窗口（含今天往前数7天），跟自然周对不上没关系——平时说
+           "7天内"指的就是这种滚动窗口，不然每周一都会有一天数据"消失"，看着莫名其妙 -->
+      <el-row :gutter="16" style="margin-top: 16px">
+        <el-col :span="24">
+          <el-card>
+            <template #header>近7天产能</template>
+            <el-row :gutter="12" class="week-totals">
+              <el-col :xs="12" :sm="8">
+                <div class="stat-label">近7天加工数量</div>
+                <div class="stat-value">{{ overview.week.processedQty.toLocaleString() }}</div>
+              </el-col>
+              <el-col :xs="12" :sm="8">
+                <div class="stat-label">近7天加工金额</div>
+                <div class="stat-value">¥{{ overview.week.processedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</div>
+              </el-col>
+              <el-col :xs="12" :sm="8">
+                <div class="stat-label">近7天入库单数</div>
+                <div class="stat-value">{{ overview.week.inboundCount }}</div>
+              </el-col>
+            </el-row>
+
+            <!-- 每天一行，条形宽度按当天数量占这7天里最大那天的比例画，一眼看出节奏是升是降；
+                 没有数据的日子条形是空的（宽度0），不是缺失了这一天 -->
+            <div class="day-bars">
+              <div v-for="d in overview.week.daily" :key="d.date" class="day-bar-row">
+                <span class="day-bar-label">{{ weekdayLabel(d.date) }}</span>
+                <div class="day-bar-track">
+                  <div class="day-bar-fill" :style="{ width: barWidth(d.qty) }" />
+                </div>
+                <span class="day-bar-qty">{{ d.qty.toLocaleString() }}</span>
+              </div>
+            </div>
+            <el-empty v-if="!overview.week.processedQty" description="近7天暂无加工数据" />
           </el-card>
         </el-col>
       </el-row>
@@ -153,6 +209,50 @@ onMounted(load);
 
 .stat-value.warn {
   color: #e6a23c;
+}
+
+.week-totals {
+  margin-bottom: 16px;
+}
+
+.day-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.day-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.day-bar-label {
+  flex: 0 0 110px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.day-bar-track {
+  flex: 1;
+  height: 16px;
+  background: #f0f2f5;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.day-bar-fill {
+  height: 100%;
+  background: #409eff;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.day-bar-qty {
+  flex: 0 0 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
 }
 
 .alert-row {
