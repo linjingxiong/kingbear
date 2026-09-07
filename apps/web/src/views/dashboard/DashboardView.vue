@@ -35,6 +35,19 @@ function barWidth(qty: number) {
 // 不引入 dayjs 的中文 locale（怕影响其它页面已经在用的默认英文 locale），
 // 星期几直接手动映射
 const WEEKDAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
+// 表格底部合计行：直接用 week 汇总的总数量/总金额，跟上面 bySku 各行加起来是同一个数，
+// 不用在这里重新 reduce 一遍
+function weekSkuSummary({ columns }: { columns: { property: string }[] }) {
+  return columns.map((col, index) => {
+    if (index === 0) return "合计";
+    if (col.property === "qty") return overview.value?.week.processedQty.toLocaleString() ?? "";
+    if (col.property === "amount") {
+      return `¥${overview.value?.week.processedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? ""}`;
+    }
+    return "";
+  });
+}
+
 function weekdayLabel(date: string) {
   return `${dayjs(date).format("MM-DD")} 周${WEEKDAY_NAMES[dayjs(date).day()]}`;
 }
@@ -128,13 +141,13 @@ function weekdayLabel(date: string) {
                  这里按货号拆开列出各自的加工数量和金额 -->
             <template v-if="overview.week.bySku.length">
               <div class="week-sku-title">近7天按货号明细</div>
-              <el-table :data="overview.week.bySku" size="default">
+              <el-table :data="overview.week.bySku" size="default" show-summary :summary-method="weekSkuSummary">
                 <el-table-column prop="sku" label="货号" width="140" />
                 <el-table-column prop="name" label="名称" show-overflow-tooltip />
-                <el-table-column label="近7天加工数量" align="right" width="160">
+                <el-table-column prop="qty" label="近7天加工数量" align="right" width="160">
                   <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
                 </el-table-column>
-                <el-table-column label="近7天加工金额" align="right" width="160">
+                <el-table-column prop="amount" label="近7天加工金额" align="right" width="160">
                   <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
                 </el-table-column>
               </el-table>
