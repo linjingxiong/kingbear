@@ -123,6 +123,22 @@ function weekdayLabel(date: string) {
               </div>
             </div>
             <el-empty v-if="!overview.week.processedQty" description="近7天暂无加工数据" />
+
+            <!-- 近7天汇总总数不分品类没意义（跟"本月加工数量明细"同一个道理），
+                 这里按货号拆开列出各自的加工数量和金额 -->
+            <template v-if="overview.week.bySku.length">
+              <div class="week-sku-title">近7天按货号明细</div>
+              <el-table :data="overview.week.bySku" size="default">
+                <el-table-column prop="sku" label="货号" width="140" />
+                <el-table-column prop="name" label="名称" show-overflow-tooltip />
+                <el-table-column label="近7天加工数量" align="right" width="160">
+                  <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
+                </el-table-column>
+                <el-table-column label="近7天加工金额" align="right" width="160">
+                  <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
+                </el-table-column>
+              </el-table>
+            </template>
           </el-card>
         </el-col>
       </el-row>
@@ -213,6 +229,14 @@ function weekdayLabel(date: string) {
 
 .week-totals {
   margin-bottom: 16px;
+}
+
+.week-sku-title {
+  margin-top: 20px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
 }
 
 .day-bars {

@@ -70,6 +70,7 @@ export class DashboardService {
         processedAmount: sumAmount(weekItems),
         inboundCount: weekRecords.length,
         daily: this.groupByDay(weekItems, weekStart),
+        bySku: this.groupBySku(weekItems),
       },
       month: {
         processedAmount: sumAmount(monthItems),
@@ -158,9 +159,9 @@ export class DashboardService {
   }
 
   /**
-   * "本月加工数量"这个总数不同货号加在一起没有意义（见 billing.service 里同样的原则），
+   * "加工数量"这个总数不同货号加在一起没有意义（见 billing.service 里同样的原则），
    * 首页只放一个笼统的数字容易让人误会。这里按货号拆开算，前端展开明细表，
-   * 才是真正能看的"详情"。
+   * 才是真正能看的"详情"。本月、近7天两处统计都是同一套口径，共用这一个方法。
    */
   private groupBySku(monthItems: LiveItem[]) {
     const map = new Map<string, { sku: string; name: string; qty: number; amount: number }>();

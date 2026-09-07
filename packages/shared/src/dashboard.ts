@@ -24,6 +24,8 @@ export interface DashboardWeekStats {
   inboundCount: number;
   /** 按日期升序，从6天前排到今天，固定7条 */
   daily: DashboardDayStat[];
+  /** 近7天按货号（品类）拆开的加工数量/金额 */
+  bySku: DashboardSkuStat[];
 }
 
 export interface FactoryRankingItem {
