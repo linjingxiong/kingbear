@@ -57,4 +57,6 @@ export interface DashboardOverview {
   ranking: FactoryRankingItem[];
   alerts: DashboardAlerts;
   monthBySku: DashboardSkuStat[];
+  /** 不限时间范围的累计加工数量/金额，按货号拆开——"关注货号"卡片切到"所有"时用 */
+  allTimeBySku: DashboardSkuStat[];
 }

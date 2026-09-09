@@ -58,24 +58,31 @@ async function loadProductOptions() {
   productOptions.value = [...skuMap.entries()].map(([sku, name]) => ({ sku, name }));
 }
 
-// 关注货号卡片要同时展示"今日"和"近7天"两个时间口径，各自按选中的货号从对应的
+// "今日"固定展示，第二个时间口径在"近7天"和"所有"（不限时间的累计）之间切换——
+// 平时盯近7天的节奏，偶尔想看看这个货号总共做了多少就切到"所有"，不用两个都摆出来占地方
+const featuredRange = ref<"week" | "all">("week");
+
+const featuredRangeLabel = computed(() => (featuredRange.value === "week" ? "近7天" : "所有"));
+
+// 关注货号卡片同时展示"今日"和当前选中的时间口径，各自按选中的货号从对应的
 // bySku 明细里筛出来；没有加工记录的货号（比如刚选中还没排产）数量金额都是0，不是漏了
 const featuredRows = computed(() => {
   if (!overview.value) return [];
+  const rangeBySku = featuredRange.value === "week" ? overview.value.week.bySku : overview.value.allTimeBySku;
   return featuredSkus.value.map((sku) => {
     const name =
       productOptions.value.find((p) => p.sku === sku)?.name ??
-      overview.value!.week.bySku.find((s) => s.sku === sku)?.name ??
+      rangeBySku.find((s) => s.sku === sku)?.name ??
       sku;
     const today = overview.value!.today.bySku.find((s) => s.sku === sku);
-    const week = overview.value!.week.bySku.find((s) => s.sku === sku);
+    const range = rangeBySku.find((s) => s.sku === sku);
     return {
       sku,
       name,
       todayQty: today?.qty ?? 0,
       todayAmount: today?.amount ?? 0,
-      weekQty: week?.qty ?? 0,
-      weekAmount: week?.amount ?? 0,
+      rangeQty: range?.qty ?? 0,
+      rangeAmount: range?.amount ?? 0,
     };
   });
 });
@@ -145,6 +152,11 @@ function weekdayLabel(date: string) {
               </div>
             </template>
             <template v-if="featuredRows.length">
+              <!-- "今日"固定展示，第二栏在"近7天"/"所有"之间切，不用两个都摆出来占地方 -->
+              <el-radio-group v-model="featuredRange" size="small" class="featured-range">
+                <el-radio-button value="week">7天</el-radio-button>
+                <el-radio-button value="all">所有</el-radio-button>
+              </el-radio-group>
               <div v-for="row in featuredRows" :key="row.sku" class="featured-sku-row">
                 <div class="featured-sku-name">{{ row.sku }} · {{ row.name }}</div>
                 <div class="featured-sku-stats">
@@ -154,9 +166,9 @@ function weekdayLabel(date: string) {
                     <span class="featured-stat-amount">¥{{ row.todayAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</span>
                   </div>
                   <div class="featured-stat">
-                    <span class="featured-stat-label">近7天</span>
-                    <span class="featured-stat-value">{{ row.weekQty.toLocaleString() }}</span>
-                    <span class="featured-stat-amount">¥{{ row.weekAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</span>
+                    <span class="featured-stat-label">{{ featuredRangeLabel }}</span>
+                    <span class="featured-stat-value">{{ row.rangeQty.toLocaleString() }}</span>
+                    <span class="featured-stat-amount">¥{{ row.rangeAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</span>
                   </div>
                 </div>
               </div>
@@ -357,6 +369,10 @@ function weekdayLabel(date: string) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.featured-range {
+  margin-bottom: 8px;
 }
 
 .featured-sku-row {

@@ -39,18 +39,21 @@ export class DashboardService {
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const yearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    const [todayRecords, weekRecords, monthRecords] = await Promise.all([
+    const [todayRecords, weekRecords, monthRecords, allRecords] = await Promise.all([
       this.findCompleted(todayStart, todayEnd),
       this.findCompleted(weekStart, todayEnd),
       this.findCompleted(monthStart, monthEnd),
+      // "关注货号"卡片要支持切到"所有"（不限时间的累计），不能只查某个区间
+      this.inboundModel.find({ status: InboundStatus.Completed }),
     ]);
-    // 首页这几块统计（今日/近7天/本月/玩具厂排行/按货号明细/未收款）全都基于同一份
+    // 首页这几块统计（今日/近7天/本月/累计/玩具厂排行/按货号明细/未收款）全都基于同一份
     // "已完成记录 + 实时产品价格"算出来的明细行，跟应收账单、入库管理列表用的是同一个
     // 口径，不会出现"首页说 8 万、账单说 9 万"这种同一个数字两个地方对不上的情况
-    const [todayItems, weekItems, monthItems] = await Promise.all([
+    const [todayItems, weekItems, monthItems, allItems] = await Promise.all([
       this.withLivePrices(todayRecords),
       this.withLivePrices(weekRecords),
       this.withLivePrices(monthRecords),
+      this.withLivePrices(allRecords),
     ]);
 
     const [ranking, alerts, unpaidAmount] = await Promise.all([
@@ -82,6 +85,7 @@ export class DashboardService {
       ranking,
       alerts,
       monthBySku: this.groupBySku(monthItems),
+      allTimeBySku: this.groupBySku(allItems),
     };
   }
 
