@@ -58,17 +58,23 @@ async function loadProductOptions() {
   productOptions.value = [...skuMap.entries()].map(([sku, name]) => ({ sku, name }));
 }
 
-// "今日"固定展示，第二个时间口径在"近7天"和"所有"（不限时间的累计）之间切换——
-// 平时盯近7天的节奏，偶尔想看看这个货号总共做了多少就切到"所有"，不用两个都摆出来占地方
-const featuredRange = ref<"week" | "all">("week");
+// "今日"固定展示，第二个时间口径在"近7天"/"本月"/"所有"（不限时间的累计）之间切换——
+// 平时盯近7天的节奏，月底想核对本月总量就切"本月"，偶尔想看看这个货号总共做了多少
+// 就切到"所有"，不用三个都摆出来占地方
+const featuredRange = ref<"week" | "month" | "all">("week");
 
-const featuredRangeLabel = computed(() => (featuredRange.value === "week" ? "近7天" : "所有"));
+const FEATURED_RANGE_LABELS = { week: "近7天", month: "本月", all: "所有" } as const;
+const featuredRangeLabel = computed(() => FEATURED_RANGE_LABELS[featuredRange.value]);
 
 // 关注货号卡片同时展示"今日"和当前选中的时间口径，各自按选中的货号从对应的
 // bySku 明细里筛出来；没有加工记录的货号（比如刚选中还没排产）数量金额都是0，不是漏了
 const featuredRows = computed(() => {
   if (!overview.value) return [];
-  const rangeBySku = featuredRange.value === "week" ? overview.value.week.bySku : overview.value.allTimeBySku;
+  const rangeBySku = {
+    week: overview.value.week.bySku,
+    month: overview.value.monthBySku,
+    all: overview.value.allTimeBySku,
+  }[featuredRange.value];
   return featuredSkus.value.map((sku) => {
     const name =
       productOptions.value.find((p) => p.sku === sku)?.name ??
@@ -152,9 +158,10 @@ function weekdayLabel(date: string) {
               </div>
             </template>
             <template v-if="featuredRows.length">
-              <!-- "今日"固定展示，第二栏在"近7天"/"所有"之间切，不用两个都摆出来占地方 -->
+              <!-- "今日"固定展示，第二栏在"近7天"/"本月"/"所有"之间切，不用三个都摆出来占地方 -->
               <el-radio-group v-model="featuredRange" size="small" class="featured-range">
                 <el-radio-button value="week">7天</el-radio-button>
+                <el-radio-button value="month">本月</el-radio-button>
                 <el-radio-button value="all">所有</el-radio-button>
               </el-radio-group>
               <div v-for="row in featuredRows" :key="row.sku" class="featured-sku-row">
