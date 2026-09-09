@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import dayjs from "dayjs";
 import type { DashboardOverview } from "@kingbear/shared";
 import { getDashboardOverview } from "../../api/dashboard";
+import { listFactories } from "../../api/factory";
+import { listProductsByFactory } from "../../api/product";
 // 直接把完整的应收账单页面嵌进首页，不用再跳转过去——首页往下滚就是它，
 // 玩具厂/账期选择、tab、明细这些原样保留，跟单独打开应收账单页是同一个组件
 import BillingView from "../billing/BillingView.vue";
@@ -19,7 +21,70 @@ async function load() {
   }
 }
 
-onMounted(load);
+// "关注货号"：手机端登录后优先看到的实时加工数据，选哪些货号是用户自己定的
+// （比如现在关心的火龙果那几个货号），不写死在代码里，以后关注的品类变了不用改代码。
+// 选择结果存在这台设备的浏览器里——这是纯粹的个人使用偏好，不是要跨设备同步的业务数据，
+// 换个手机/浏览器要重选一次是可以接受的
+const FEATURED_SKUS_KEY = "kingbear-featured-skus";
+const featuredSkus = ref<string[]>([]);
+const productOptions = ref<{ sku: string; name: string }[]>([]);
+
+function loadFeaturedSkus() {
+  try {
+    const raw = localStorage.getItem(FEATURED_SKUS_KEY);
+    if (raw) featuredSkus.value = JSON.parse(raw);
+  } catch {
+    // 存的内容读不出来就当没选过，不影响正常使用
+  }
+}
+
+watch(featuredSkus, (skus) => {
+  try {
+    localStorage.setItem(FEATURED_SKUS_KEY, JSON.stringify(skus));
+  } catch {
+    // 存不进去（比如隐私模式）就算了，不影响本次使用
+  }
+});
+
+// 货号选择器的候选项：全部玩具厂的产品档案取一遍货号+名称去重，不依赖"最近有没有加工过"——
+// 刚建档还没排产的新货号也要能选
+async function loadProductOptions() {
+  const factories = await listFactories();
+  const productLists = await Promise.all(factories.map((f) => listProductsByFactory(f.id)));
+  const skuMap = new Map<string, string>();
+  for (const list of productLists) {
+    for (const p of list) skuMap.set(p.sku, p.name);
+  }
+  productOptions.value = [...skuMap.entries()].map(([sku, name]) => ({ sku, name }));
+}
+
+// 关注货号卡片要同时展示"今日"和"近7天"两个时间口径，各自按选中的货号从对应的
+// bySku 明细里筛出来；没有加工记录的货号（比如刚选中还没排产）数量金额都是0，不是漏了
+const featuredRows = computed(() => {
+  if (!overview.value) return [];
+  return featuredSkus.value.map((sku) => {
+    const name =
+      productOptions.value.find((p) => p.sku === sku)?.name ??
+      overview.value!.week.bySku.find((s) => s.sku === sku)?.name ??
+      sku;
+    const today = overview.value!.today.bySku.find((s) => s.sku === sku);
+    const week = overview.value!.week.bySku.find((s) => s.sku === sku);
+    return {
+      sku,
+      name,
+      todayQty: today?.qty ?? 0,
+      todayAmount: today?.amount ?? 0,
+      weekQty: week?.qty ?? 0,
+      weekAmount: week?.amount ?? 0,
+    };
+  });
+});
+
+onMounted(() => {
+  loadFeaturedSkus();
+  load();
+  loadProductOptions();
+});
 
 // 近7天每天的加工数量条形图，用纯 CSS 画（不引入图表库）：每天的宽度是当天数量占
 // 这7天里最大那天的百分比，最大那天始终画满，方便一眼看出节奏是升是降
@@ -56,6 +121,51 @@ function weekdayLabel(date: string) {
 <template>
   <div v-loading="loading" class="dashboard">
     <template v-if="overview">
+      <!-- 关注货号：只在手机宽度下显示，摆在整个首页最上面——手机登录一般是出门在外
+           临时看一眼进度，最关心的就是自己勾的这几个货号今天/近7天做了多少，
+           不想还要往下翻过好几张卡片才看到。桌面端不受影响，照常隐藏。 -->
+      <el-row class="featured-row">
+        <el-col :span="24">
+          <el-card class="featured-card">
+            <template #header>
+              <div class="featured-header">
+                <span>关注货号 · 实时加工</span>
+                <el-select
+                  v-model="featuredSkus"
+                  multiple
+                  filterable
+                  collapse-tags
+                  collapse-tags-tooltip
+                  placeholder="选择要关注的货号"
+                  size="small"
+                  style="max-width: 220px"
+                >
+                  <el-option v-for="p in productOptions" :key="p.sku" :label="`${p.sku} · ${p.name}`" :value="p.sku" />
+                </el-select>
+              </div>
+            </template>
+            <template v-if="featuredRows.length">
+              <div v-for="row in featuredRows" :key="row.sku" class="featured-sku-row">
+                <div class="featured-sku-name">{{ row.sku }} · {{ row.name }}</div>
+                <div class="featured-sku-stats">
+                  <div class="featured-stat">
+                    <span class="featured-stat-label">今日</span>
+                    <span class="featured-stat-value">{{ row.todayQty.toLocaleString() }}</span>
+                    <span class="featured-stat-amount">¥{{ row.todayAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</span>
+                  </div>
+                  <div class="featured-stat">
+                    <span class="featured-stat-label">近7天</span>
+                    <span class="featured-stat-value">{{ row.weekQty.toLocaleString() }}</span>
+                    <span class="featured-stat-amount">¥{{ row.weekAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <el-empty v-else description="还没选要关注的货号，点右上角选一下" :image-size="60" />
+          </el-card>
+        </el-col>
+      </el-row>
+
       <!-- 手机上（:xs）两张卡片各占一整行，不再硬挤在一行里；卡片内部的小格子也是
            手机上两个一排（:xs="12"），桌面照旧一排排开 -->
       <el-row :gutter="16">
@@ -225,6 +335,71 @@ function weekdayLabel(date: string) {
 </template>
 
 <style scoped>
+/* 只在手机宽度下出现——桌面端屏幕够宽，不需要把"关注货号"单独顶到最前面，
+   跟其它卡片一起正常排就行 */
+.featured-row {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .featured-row {
+    display: block;
+    margin-bottom: 16px;
+  }
+}
+
+.featured-card :deep(.el-card__header) {
+  padding: 12px 16px;
+}
+
+.featured-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.featured-sku-row {
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.featured-sku-row:last-child {
+  border-bottom: none;
+}
+
+.featured-sku-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.featured-sku-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.featured-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.featured-stat-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.featured-stat-value {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.featured-stat-amount {
+  font-size: 12px;
+  color: #67c23a;
+}
+
 .stat-label {
   color: #909399;
   font-size: 13px;

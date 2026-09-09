@@ -2,6 +2,8 @@ export interface DashboardTodayStats {
   inboundCount: number;
   processedQty: number;
   processedAmount: number;
+  /** 今日按货号拆开的加工数量/金额——首页"关注货号"卡片按货号筛选实时数据要用 */
+  bySku: DashboardSkuStat[];
 }
 
 export interface DashboardMonthStats {

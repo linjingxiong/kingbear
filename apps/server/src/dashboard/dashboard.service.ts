@@ -64,6 +64,7 @@ export class DashboardService {
         inboundCount: todayRecords.length,
         processedQty: sumQty(todayItems),
         processedAmount: sumAmount(todayItems),
+        bySku: this.groupBySku(todayItems),
       },
       week: {
         processedQty: sumQty(weekItems),
