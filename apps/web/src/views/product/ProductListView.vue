@@ -38,7 +38,15 @@ function materialsSummary(row: Product) {
 
 // 树形数据：每个产品一个父节点，children 是归到它下面的工序；最后再拼一个"未归集"
 // 虚拟父节点，放 productGroupId 为空的工序。row-key 要在父子之间全局唯一。
-type GroupNode = { rowKey: string; kind: "group"; id: string; name: string; virtual: boolean; children: StepNode[] };
+type GroupNode = {
+  rowKey: string;
+  kind: "group";
+  id: string;
+  name: string;
+  virtual: boolean;
+  materialCount: number;
+  children: StepNode[];
+};
 type StepNode = Product & { rowKey: string; kind: "step" };
 
 const treeData = computed<GroupNode[]>(() => {
@@ -55,12 +63,21 @@ const treeData = computed<GroupNode[]>(() => {
     id: g.id,
     name: g.name,
     virtual: false,
+    materialCount: g.materialIds.length,
     children: stepsByGroup.get(g.id) ?? [],
   }));
 
   const unassigned = stepsByGroup.get(UNASSIGNED) ?? [];
   if (unassigned.length) {
-    nodes.push({ rowKey: `g_${UNASSIGNED}`, kind: "group", id: UNASSIGNED, name: "未归集", virtual: true, children: unassigned });
+    nodes.push({
+      rowKey: `g_${UNASSIGNED}`,
+      kind: "group",
+      id: UNASSIGNED,
+      name: "未归集",
+      virtual: true,
+      materialCount: 0,
+      children: unassigned,
+    });
   }
   return nodes;
 });
@@ -96,20 +113,25 @@ const groupDialogVisible = ref(false);
 const groupDialogMode = ref<"create" | "edit">("create");
 const groupEditingId = ref<string | null>(null);
 const groupFormRef = ref<FormInstance>();
-const groupForm = reactive<CreateProductGroupDto>({ factoryId: "", name: "", remark: "" });
+const groupForm = reactive<CreateProductGroupDto>({ factoryId: "", name: "", remark: "", materialIds: [] });
 const groupRules = { name: [{ required: true, message: "请输入产品名称", trigger: "blur" }] };
 
 function openGroupCreate() {
   groupDialogMode.value = "create";
   groupEditingId.value = null;
-  Object.assign(groupForm, { factoryId: selectedFactoryId.value, name: "", remark: "" });
+  Object.assign(groupForm, { factoryId: selectedFactoryId.value, name: "", remark: "", materialIds: [] });
   groupDialogVisible.value = true;
 }
 function openGroupEdit(node: GroupNode) {
   groupDialogMode.value = "edit";
   groupEditingId.value = node.id;
   const g = groups.value.find((x) => x.id === node.id);
-  Object.assign(groupForm, { factoryId: selectedFactoryId.value, name: g?.name ?? "", remark: g?.remark ?? "" });
+  Object.assign(groupForm, {
+    factoryId: selectedFactoryId.value,
+    name: g?.name ?? "",
+    remark: g?.remark ?? "",
+    materialIds: [...(g?.materialIds ?? [])],
+  });
   groupDialogVisible.value = true;
 }
 async function submitGroup() {
@@ -186,6 +208,19 @@ function openStepEdit(row: StepNode) {
   });
   stepDialogVisible.value = true;
 }
+// 工序配方能选的物料 = 所属产品勾选的那批。已经在配方里、但产品后来又取消勾选的，
+// 也一并显示出来（不然那一行会变成空白看不出选的啥），加个标记提醒
+const stepMaterialOptions = computed(() => {
+  const group = groups.value.find((g) => g.id === stepForm.productGroupId);
+  const allowed = new Set(group?.materialIds ?? []);
+  const usedButNotAllowed = (stepForm.materials ?? [])
+    .map((m) => m.materialId)
+    .filter((id) => id && !allowed.has(id));
+  return materials.value
+    .filter((m) => allowed.has(m.id) || usedButNotAllowed.includes(m.id))
+    .map((m) => ({ ...m, stale: !allowed.has(m.id) }));
+});
+
 function addStepMaterial() {
   stepForm.materials!.push({ materialId: "", qty: 0 });
 }
@@ -235,7 +270,7 @@ onMounted(async () => {
       type="info"
       :closable="false"
       show-icon
-      title="产品是父级（比如“火龙果主体”），下面挂工序（前壳半成品 / 后壳半成品 / 压杆）。工厂价、入库、应收账单都还是按工序/货号来算。还没归到产品的工序放在“未归集”里。"
+      title="产品是父级（比如“火龙果主体”），下面挂工序（前壳半成品 / 后壳半成品 / 压杆）。先给产品勾选它用到的物料，工序的物料配方只能从产品勾好的那批里选。工厂价、入库、应收账单仍按工序/货号来算，还没归到产品的工序放在“未归集”里。"
       style="margin-bottom: 12px"
     />
 
@@ -251,7 +286,9 @@ onMounted(async () => {
         <template #default="{ row }">
           <template v-if="row.kind === 'group'">
             <strong>{{ row.name }}</strong>
-            <span class="child-count">（{{ row.children.length }} 道工序）</span>
+            <span class="child-count">
+              （{{ row.children.length }} 道工序<template v-if="!row.virtual"> · {{ row.materialCount }} 种物料</template>）
+            </span>
           </template>
           <template v-else>
             <span class="step-sku">{{ row.sku }}</span>
@@ -303,9 +340,22 @@ onMounted(async () => {
       :title="groupDialogMode === 'create' ? '新增产品' : '编辑产品'"
       width="460px"
     >
-      <el-form ref="groupFormRef" :model="groupForm" :rules="groupRules" label-width="90px">
+      <el-form ref="groupFormRef" :model="groupForm" :rules="groupRules" label-width="110px">
         <el-form-item label="产品名称" prop="name">
           <el-input v-model="groupForm.name" />
+        </el-form-item>
+        <el-form-item label="本产品用到的物料">
+          <el-select
+            v-model="groupForm.materialIds"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="从物料目录里勾选（下面工序配方只能从这里挑）"
+            style="width: 100%"
+          >
+            <el-option v-for="m in materials" :key="m.id" :label="`${m.name}（${m.unit}）`" :value="m.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="groupForm.remark" type="textarea" :rows="2" />
@@ -346,14 +396,35 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="物料配方">
           <div class="material-editor">
-            <div v-for="(usage, idx) in stepForm.materials" :key="idx" class="material-row">
-              <el-select v-model="usage.materialId" filterable placeholder="选择物料" style="width: 220px">
-                <el-option v-for="m in materials" :key="m.id" :label="`${m.name}（${m.unit}）`" :value="m.id" />
-              </el-select>
-              <el-input-number v-model="usage.qty" :min="0" :precision="2" controls-position="right" style="width: 140px" />
-              <el-button link type="danger" @click="removeStepMaterial(idx)">删除</el-button>
-            </div>
-            <el-button @click="addStepMaterial">+ 添加物料</el-button>
+            <el-alert
+              v-if="!stepForm.productGroupId"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="请先把这道工序归到某个产品下，物料只能从该产品勾选的那批里选"
+            />
+            <el-alert
+              v-else-if="!stepMaterialOptions.length"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="所属产品还没勾选任何物料，先去产品那里勾一下"
+            />
+            <template v-else>
+              <div v-for="(usage, idx) in stepForm.materials" :key="idx" class="material-row">
+                <el-select v-model="usage.materialId" filterable placeholder="选择物料" style="width: 240px">
+                  <el-option
+                    v-for="m in stepMaterialOptions"
+                    :key="m.id"
+                    :label="`${m.name}（${m.unit}）${m.stale ? ' ⚠ 已不在产品物料里' : ''}`"
+                    :value="m.id"
+                  />
+                </el-select>
+                <el-input-number v-model="usage.qty" :min="0" :precision="2" controls-position="right" style="width: 140px" />
+                <el-button link type="danger" @click="removeStepMaterial(idx)">删除</el-button>
+              </div>
+              <el-button @click="addStepMaterial">+ 添加物料</el-button>
+            </template>
           </div>
         </el-form-item>
       </el-form>

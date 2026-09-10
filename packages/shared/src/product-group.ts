@@ -8,6 +8,8 @@ export interface ProductGroup {
   factoryId: string;
   name: string;
   remark?: string;
+  /** 本产品会用到的物料（从全局物料目录里选的一批）。下面工序配方的物料只能从这里面挑。 */
+  materialIds: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -16,6 +18,7 @@ export interface CreateProductGroupDto {
   factoryId: string;
   name: string;
   remark?: string;
+  materialIds?: string[];
 }
 
 export type UpdateProductGroupDto = Partial<Omit<CreateProductGroupDto, "factoryId">>;

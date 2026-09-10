@@ -15,6 +15,10 @@ export class ProductGroup extends Document {
 
   @Prop()
   remark?: string;
+
+  /** 本产品会用到的物料，下面工序的配方只能从这里面挑 */
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'Material' }], default: [] })
+  materialIds: Types.ObjectId[];
 }
 
 export const ProductGroupSchema = SchemaFactory.createForClass(ProductGroup);

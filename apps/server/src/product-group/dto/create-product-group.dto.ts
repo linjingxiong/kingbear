@@ -1,4 +1,4 @@
-import { IsMongoId, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsMongoId, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateProductGroupDto {
   @IsMongoId()
@@ -11,4 +11,9 @@ export class CreateProductGroupDto {
   @IsOptional()
   @IsString()
   remark?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  materialIds?: string[];
 }
