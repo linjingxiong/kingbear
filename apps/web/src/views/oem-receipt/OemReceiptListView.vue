@@ -11,9 +11,8 @@ const oemFactories = ref<OemFactory[]>([]);
 const list = ref<OemReceiptListItem[]>([]);
 const loading = ref(false);
 
-// 产品(货号)选择器的候选项——不限玩具厂，全量取一遍，标签上带一下货号+名称，
-// 方便区分同名产品；成品回收记的是"哪个代工厂交回了哪个货号"，跟这个货号原本属于
-// 哪个玩具厂无关，所以不用先选玩具厂再选产品
+// 工序(货号)选择器的候选项——不限玩具厂，全量取一遍，标签上带一下货号+名称；
+// 成品回收记的是"哪个代工厂交回了哪道工序的货多少"，物料对账按这道工序的配方算耗料
 const productOptions = ref<Product[]>([]);
 async function loadProductOptions() {
   const factories = await listFactories();
@@ -44,7 +43,7 @@ const form = reactive<CreateOemReceiptDto>({
 
 const rules = {
   oemFactoryId: [{ required: true, message: "请选择代工厂", trigger: "change" }],
-  productId: [{ required: true, message: "请选择产品", trigger: "change" }],
+  productId: [{ required: true, message: "请选择工序", trigger: "change" }],
   qty: [{ required: true, message: "请输入数量", trigger: "blur" }],
   receivedDate: [{ required: true, message: "请选择回收日期", trigger: "change" }],
 };
@@ -125,7 +124,7 @@ onMounted(async () => {
     <el-table v-loading="loading" :data="list" border>
       <el-table-column prop="oemFactoryName" label="代工厂" width="140" />
       <el-table-column prop="productSku" label="货号" width="120" />
-      <el-table-column prop="productName" label="产品名称" show-overflow-tooltip />
+      <el-table-column prop="productName" label="工序名称" show-overflow-tooltip />
       <el-table-column label="数量" width="100" align="right">
         <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
       </el-table-column>
@@ -161,7 +160,7 @@ onMounted(async () => {
             <el-option v-for="f in oemFactories" :key="f.id" :label="f.name" :value="f.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="产品" prop="productId">
+        <el-form-item label="工序" prop="productId">
           <el-select v-model="form.productId" filterable style="width: 100%">
             <el-option v-for="p in productOptions" :key="p.id" :label="`${p.sku} · ${p.name}`" :value="p.id" />
           </el-select>

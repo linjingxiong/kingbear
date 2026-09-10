@@ -1,6 +1,7 @@
 export * from "./enums";
 export * from "./factory";
 export * from "./product";
+export * from "./product-group";
 export * from "./inbound";
 export * from "./billing";
 export * from "./dashboard";

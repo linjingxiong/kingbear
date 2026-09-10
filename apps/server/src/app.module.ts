@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { FactoryModule } from './factory/factory.module';
 import { ProductModule } from './product/product.module';
+import { ProductGroupModule } from './product-group/product-group.module';
 import { InboundModule } from './inbound/inbound.module';
 import { OcrModule } from './ocr/ocr.module';
 import { BillingModule } from './billing/billing.module';
@@ -36,6 +37,7 @@ import { OemReconciliationModule } from './oem-reconciliation/oem-reconciliation
     AuthModule,
     FactoryModule,
     ProductModule,
+    ProductGroupModule,
     OcrModule,
     InboundModule,
     BillingModule,

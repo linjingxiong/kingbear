@@ -20,8 +20,8 @@ export class OemReconciliationService {
   /**
    * 按"代工厂 + 物料"两两配对，算已发-应耗-结余：
    * 已发 = 这个代工厂所有发料记录里这种物料的数量之和；
-   * 应耗 = 这个代工厂所有成品回收记录，按对应产品的工序配方（同一物料跨多道工序的用量要
-   * 累加），乘以回收数量，再按物料汇总；
+   * 应耗 = 这个代工厂所有成品回收记录，按对应工序（Product）的物料配方乘以回收数量，
+   * 再按物料汇总；
    * 结余 = 已发 - 应耗，正常应该 >= 0，明显偏离说明物料去向对不上账，需要人工核查。
    */
   async getReconciliation() {
@@ -48,14 +48,12 @@ export class OemReconciliationService {
     for (const receipt of receipts) {
       const product = productMap.get(String(receipt.productId));
       if (!product) continue;
-      // 同一物料可能出现在这个产品的好几道工序里，先按物料把每单位产品的用量加总，
-      // 再乘以这批回收的数量——不能只看某一道工序，不然会漏算
+      // 同一物料在一道工序的配方里理论上只出现一次，但保险起见按物料把用量加总一下，
+      // 再乘以这批回收的数量
       const perUnitByMaterial = new Map<string, number>();
-      for (const step of product.processes ?? []) {
-        for (const usage of step.materials ?? []) {
-          const materialId = String(usage.materialId);
-          perUnitByMaterial.set(materialId, (perUnitByMaterial.get(materialId) ?? 0) + usage.qty);
-        }
+      for (const usage of product.materials ?? []) {
+        const materialId = String(usage.materialId);
+        perUnitByMaterial.set(materialId, (perUnitByMaterial.get(materialId) ?? 0) + usage.qty);
       }
       for (const [materialId, perUnitQty] of perUnitByMaterial) {
         const key = `${receipt.oemFactoryId}|${materialId}`;

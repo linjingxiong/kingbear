@@ -33,7 +33,7 @@ onMounted(load);
       type="info"
       :closable="false"
       show-icon
-      title="应耗 = 每条成品回收记录按对应产品的工序配方算出来的物料消耗量之和；结余 = 已发 - 应耗，正常应该 ≥ 0，标红说明物料去向对不上账，需要核查"
+      title="应耗 = 每条成品回收记录按对应工序的物料配方算出来的物料消耗量之和；结余 = 已发 - 应耗，正常应该 ≥ 0，标红说明物料去向对不上账，需要核查"
       style="margin-bottom: 12px"
     />
     <el-table v-loading="loading" :data="list" border :row-class-name="rowClassName">

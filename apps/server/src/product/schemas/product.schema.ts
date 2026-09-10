@@ -1,32 +1,29 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
-/** 一道工序里，某种物料的用量——materialId 指向全局物料目录，配比是手动录入的数字 */
+/** 这道工序（货号）用某种物料的用量——materialId 指向全局物料目录，配比是手动录入的数字 */
 @Schema({ _id: false })
-export class ProcessStepMaterial {
+export class ProductMaterial {
   @Prop({ type: Types.ObjectId, ref: 'Material', required: true })
   materialId: Types.ObjectId;
 
   @Prop({ required: true })
   qty: number;
 }
-export const ProcessStepMaterialSchema = SchemaFactory.createForClass(ProcessStepMaterial);
+export const ProductMaterialSchema = SchemaFactory.createForClass(ProductMaterial);
 
-/** 工序：产品要经过哪几道工序、每道工序耗哪些物料，代工厂成品回收后按这个算应耗物料 */
-@Schema({ _id: false })
-export class ProcessStep {
-  @Prop({ required: true })
-  name: string;
-
-  @Prop({ type: [ProcessStepMaterialSchema], default: [] })
-  materials: ProcessStepMaterial[];
-}
-export const ProcessStepSchema = SchemaFactory.createForClass(ProcessStep);
-
+/**
+ * "产品"（Product）这个实体其实是用户口径里的"工序"——带货号的这一层。
+ * productGroupId 指向 ProductGroup（用户说的"产品"），是工序的父级。
+ */
 @Schema({ timestamps: true, collection: 'products' })
 export class Product extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Factory', required: true, index: true })
   factoryId: Types.ObjectId;
+
+  /** 所属产品（ProductGroup）。历史数据可能还没归集，所以不是 required */
+  @Prop({ type: Types.ObjectId, ref: 'ProductGroup', index: true })
+  productGroupId?: Types.ObjectId;
 
   @Prop({ required: true })
   sku: string;
@@ -45,8 +42,9 @@ export class Product extends Document {
   @Prop()
   remark?: string;
 
-  @Prop({ type: [ProcessStepSchema], default: [] })
-  processes: ProcessStep[];
+  /** 物料配方：这道工序耗哪些物料、各耗多少，代工厂成品回收后按这个算应耗物料 */
+  @Prop({ type: [ProductMaterialSchema], default: [] })
+  materials: ProductMaterial[];
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance } from "element-plus";
-import type { CreateProductDto, FactoryListItem, Material, Product, ProcessStep } from "@kingbear/shared";
+import type { CreateProductDto, FactoryListItem, Material, Product, ProductGroup, ProductMaterial } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { createProduct, deleteProduct, listProductsByFactory, updateProduct } from "../../api/product";
+import { listProductGroupsByFactory } from "../../api/product-group";
 import { listMaterials } from "../../api/material";
 
 const factories = ref<FactoryListItem[]>([]);
@@ -11,10 +12,17 @@ const selectedFactoryId = ref<string>("");
 const list = ref<Product[]>([]);
 const loading = ref(false);
 
-// 工序里"选物料"这个下拉框的候选项——全局物料目录，跟代工厂/资产盘点那边共用同一份
+// 选物料的下拉框候选项——全局物料目录，跟代工厂/资产盘点那边共用同一份
 const materials = ref<Material[]>([]);
 function materialName(id: string) {
   return materials.value.find((m) => m.id === id)?.name ?? "";
+}
+
+// "所属产品"下拉框候选项——跟着选中的玩具厂走
+const productGroups = ref<ProductGroup[]>([]);
+function productGroupName(id?: string) {
+  if (!id) return "";
+  return productGroups.value.find((g) => g.id === id)?.name ?? "";
 }
 
 const dialogVisible = ref(false);
@@ -23,40 +31,32 @@ const editingId = ref<string | null>(null);
 const formRef = ref<FormInstance>();
 const form = reactive<CreateProductDto>({
   factoryId: "",
+  productGroupId: undefined,
   sku: "",
   name: "",
   factoryPrice: 0,
   processPrice: undefined,
   remark: "",
-  processes: [],
+  materials: [],
 });
 
-// 表格里"工序/配方"列的悬浮提示文字，拼出"工序名：物料×数量、物料×数量"
-function stepSummary(step: ProcessStep) {
-  return `${step.name}：${step.materials.map((m) => `${materialName(m.materialId)}×${m.qty}`).join("、")}`;
+// 表格里"物料配方"列的悬浮提示文字
+function materialsSummary(row: Product) {
+  return row.materials.map((m) => `${materialName(m.materialId)}×${m.qty}`).join("、");
 }
 
-// 工序/物料配方的增删改——每道工序至少留一行物料，方便直接改配比，不用先点"添加"
-function addProcessStep() {
-  form.processes!.push({ name: "", materials: [{ materialId: "", qty: 0 }] });
+function addMaterial() {
+  form.materials!.push({ materialId: "", qty: 0 });
 }
 
-function removeProcessStep(index: number) {
-  form.processes!.splice(index, 1);
-}
-
-function addProcessMaterial(step: ProcessStep) {
-  step.materials.push({ materialId: "", qty: 0 });
-}
-
-function removeProcessMaterial(step: ProcessStep, index: number) {
-  step.materials.splice(index, 1);
+function removeMaterial(index: number) {
+  form.materials!.splice(index, 1);
 }
 
 const rules = {
   factoryId: [{ required: true, message: "请选择所属玩具厂", trigger: "change" }],
   sku: [{ required: true, message: "请输入货号", trigger: "blur" }],
-  name: [{ required: true, message: "请输入名称", trigger: "blur" }],
+  name: [{ required: true, message: "请输入工序名称", trigger: "blur" }],
   factoryPrice: [{ required: true, message: "请输入工厂价", trigger: "blur" }],
 };
 
@@ -67,32 +67,37 @@ async function loadFactories() {
   }
 }
 
-async function loadProducts() {
+async function loadForFactory() {
   if (!selectedFactoryId.value) {
     list.value = [];
+    productGroups.value = [];
     return;
   }
   loading.value = true;
   try {
-    list.value = await listProductsByFactory(selectedFactoryId.value);
+    [list.value, productGroups.value] = await Promise.all([
+      listProductsByFactory(selectedFactoryId.value),
+      listProductGroupsByFactory(selectedFactoryId.value),
+    ]);
   } finally {
     loading.value = false;
   }
 }
 
-watch(selectedFactoryId, loadProducts);
+watch(selectedFactoryId, loadForFactory);
 
 function openCreate() {
   dialogMode.value = "create";
   editingId.value = null;
   Object.assign(form, {
     factoryId: selectedFactoryId.value,
+    productGroupId: undefined,
     sku: "",
     name: "",
     factoryPrice: 0,
     processPrice: undefined,
     remark: "",
-    processes: [],
+    materials: [],
   });
   dialogVisible.value = true;
 }
@@ -102,48 +107,43 @@ function openEdit(row: Product) {
   editingId.value = row.id;
   Object.assign(form, {
     factoryId: row.factoryId,
+    productGroupId: row.productGroupId,
     sku: row.sku,
     name: row.name,
     factoryPrice: row.factoryPrice,
     processPrice: row.processPrice,
     remark: row.remark ?? "",
-    // 深拷贝一份，改弹窗里的工序不会直接改到列表里已经渲染出来的那条数据
-    processes: row.processes.map((step) => ({ name: step.name, materials: step.materials.map((m) => ({ ...m })) })),
+    // 深拷贝，改弹窗里的配方不会直接动到列表里已经渲染出来的那条
+    materials: row.materials.map((m) => ({ ...m })),
   });
   dialogVisible.value = true;
 }
 
-// 没填完的工序/物料行不提交——工序名留空、或者物料没选的行直接丢掉；一道工序丢到一个
-// 物料都不剩就把这道工序也丢掉，不然会被后端"至少一种物料""工序名必填"的校验拦下来，
-// 报一堆用户看不懂的错误
-function buildProcessesPayload(): ProcessStep[] {
-  return (form.processes ?? [])
-    .filter((step) => step.name.trim())
-    .map((step) => ({ name: step.name, materials: step.materials.filter((m) => m.materialId) }))
-    .filter((step) => step.materials.length > 0);
+// 物料没选的行直接丢掉，不然会被后端校验拦下来报一堆看不懂的错
+function buildMaterialsPayload(): ProductMaterial[] {
+  return (form.materials ?? []).filter((m) => m.materialId);
 }
 
 async function handleSubmit() {
   await formRef.value?.validate();
-  const processes = buildProcessesPayload();
+  const materialsPayload = buildMaterialsPayload();
   if (dialogMode.value === "create") {
-    await createProduct({ ...form, processes });
+    await createProduct({ ...form, materials: materialsPayload });
   } else if (editingId.value) {
-    // 编辑时后端 DTO 不允许传 factoryId（产品归属的玩具厂不可改），这里剔除掉再提交，
-    // 不然会被全局校验的 forbidNonWhitelisted 拦下来报 "property factoryId should not exist"
+    // 编辑时后端 DTO 不允许传 factoryId（工序归属的玩具厂不可改），剔除掉再提交
     const { factoryId: _factoryId, ...updateDto } = form;
-    await updateProduct(editingId.value, { ...updateDto, processes });
+    await updateProduct(editingId.value, { ...updateDto, materials: materialsPayload });
   }
   ElMessage.success("保存成功");
   dialogVisible.value = false;
-  loadProducts();
+  loadForFactory();
 }
 
 async function handleDelete(row: Product) {
-  await ElMessageBox.confirm(`确定删除产品「${row.name}」吗？`, "二次确认", { type: "warning" });
+  await ElMessageBox.confirm(`确定删除工序「${row.sku} · ${row.name}」吗？`, "二次确认", { type: "warning" });
   await deleteProduct(row.id);
   ElMessage.success("已删除");
-  loadProducts();
+  loadForFactory();
 }
 
 onMounted(async () => {
@@ -158,28 +158,39 @@ onMounted(async () => {
       <el-select v-model="selectedFactoryId" placeholder="选择玩具厂" style="width: 220px">
         <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
       </el-select>
-      <el-button type="primary" :disabled="!selectedFactoryId" @click="openCreate">新增产品</el-button>
+      <el-button type="primary" :disabled="!selectedFactoryId" @click="openCreate">新增工序</el-button>
     </div>
 
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      title="这里的每一条（带货号）是一道“工序”，归到一个“产品”下面（产品在“产品管理”里维护）。工厂价、入库、应收账单都还是按这里的工序/货号来算。"
+      style="margin-bottom: 12px"
+    />
+
     <el-table v-loading="loading" :data="list" border>
-      <el-table-column prop="sku" label="货号" width="140" />
-      <el-table-column prop="name" label="名称" />
-      <el-table-column label="工厂价（元/个）" width="140" align="right">
+      <el-table-column prop="sku" label="货号" width="120" />
+      <el-table-column prop="name" label="工序名称" />
+      <el-table-column label="所属产品" width="140">
+        <template #default="{ row }">
+          <span v-if="row.productGroupId">{{ productGroupName(row.productGroupId) }}</span>
+          <span v-else class="unassigned">未归集</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="工厂价（元/个）" width="130" align="right">
         <template #default="{ row }">{{ row.factoryPrice.toFixed(4) }}</template>
       </el-table-column>
-      <el-table-column label="加工价（元/个）" width="140" align="right">
+      <el-table-column label="加工价（元/个）" width="130" align="right">
         <template #default="{ row }">{{ row.processPrice != null ? row.processPrice.toFixed(4) : "-" }}</template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" />
-      <el-table-column label="工序/配方" width="120">
+      <el-table-column prop="remark" label="备注" show-overflow-tooltip />
+      <el-table-column label="物料配方" width="120">
         <template #default="{ row }">
-          <el-tooltip v-if="row.processes.length" placement="left">
-            <template #content>
-              <div v-for="(step, idx) in row.processes" :key="idx">{{ stepSummary(step) }}</div>
-            </template>
-            <span class="process-count">{{ row.processes.length }} 道工序</span>
+          <el-tooltip v-if="row.materials.length" :content="materialsSummary(row)" placement="left">
+            <span class="material-count">{{ row.materials.length }} 种物料</span>
           </el-tooltip>
-          <span v-else class="no-process">未设置</span>
+          <span v-else class="no-material">未设置</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
@@ -190,17 +201,22 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增产品' : '编辑产品'" width="520px">
+    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增工序' : '编辑工序'" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px" label-position="right">
         <el-form-item label="所属玩具厂" prop="factoryId">
           <el-select v-model="form.factoryId" style="width: 100%" :disabled="dialogMode === 'edit'">
             <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="所属产品">
+          <el-select v-model="form.productGroupId" clearable filterable placeholder="选择产品（可留空）" style="width: 100%">
+            <el-option v-for="g in productGroups" :key="g.id" :label="g.name" :value="g.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="货号" prop="sku">
           <el-input v-model="form.sku" />
         </el-form-item>
-        <el-form-item label="名称" prop="name">
+        <el-form-item label="工序名称" prop="name">
           <el-input v-model="form.name" />
         </el-form-item>
         <el-form-item label="工厂价(元/个)" prop="factoryPrice">
@@ -212,25 +228,18 @@ onMounted(async () => {
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="2" />
         </el-form-item>
-        <!-- 工序/物料配方：代工厂做这个产品要经过哪几道工序、每道工序耗哪些物料、配比多少，
-             物料对账（已发/应耗/结余）就是靠这个算出来的，不填也能正常保存产品 -->
-        <el-form-item label="工序/物料配方">
-          <div class="process-editor">
-            <div v-for="(step, stepIdx) in form.processes" :key="stepIdx" class="process-step">
-              <div class="process-step-header">
-                <el-input v-model="step.name" placeholder="工序名称，如：组装" style="width: 200px" />
-                <el-button link type="danger" @click="removeProcessStep(stepIdx)">删除工序</el-button>
-              </div>
-              <div v-for="(usage, matIdx) in step.materials" :key="matIdx" class="process-material-row">
-                <el-select v-model="usage.materialId" filterable placeholder="选择物料" style="width: 200px">
-                  <el-option v-for="m in materials" :key="m.id" :label="`${m.name}（${m.unit}）`" :value="m.id" />
-                </el-select>
-                <el-input-number v-model="usage.qty" :min="0" :precision="2" controls-position="right" style="width: 140px" />
-                <el-button link type="danger" @click="removeProcessMaterial(step, matIdx)">删除</el-button>
-              </div>
-              <el-button link type="primary" @click="addProcessMaterial(step)">+ 添加物料</el-button>
+        <!-- 物料配方：这道工序耗哪些物料、各耗多少（每单位货号的用量），代工厂物料对账
+             （已发/应耗/结余）就是靠这个算的，不填也能正常保存 -->
+        <el-form-item label="物料配方">
+          <div class="material-editor">
+            <div v-for="(usage, idx) in form.materials" :key="idx" class="material-row">
+              <el-select v-model="usage.materialId" filterable placeholder="选择物料" style="width: 220px">
+                <el-option v-for="m in materials" :key="m.id" :label="`${m.name}（${m.unit}）`" :value="m.id" />
+              </el-select>
+              <el-input-number v-model="usage.qty" :min="0" :precision="2" controls-position="right" style="width: 140px" />
+              <el-button link type="danger" @click="removeMaterial(idx)">删除</el-button>
             </div>
-            <el-button @click="addProcessStep">+ 添加工序</el-button>
+            <el-button @click="addMaterial">+ 添加物料</el-button>
           </div>
         </el-form-item>
       </el-form>
@@ -249,35 +258,22 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.process-count {
-  color: #409eff;
-  cursor: help;
-}
-
-.no-process {
+.unassigned,
+.no-material {
   color: #c0c4cc;
   font-size: 13px;
 }
 
-.process-editor {
+.material-count {
+  color: #409eff;
+  cursor: help;
+}
+
+.material-editor {
   width: 100%;
 }
 
-.process-step {
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-
-.process-step-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.process-material-row {
+.material-row {
   display: flex;
   align-items: center;
   gap: 8px;
