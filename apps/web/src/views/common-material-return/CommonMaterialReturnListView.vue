@@ -71,7 +71,7 @@ function openEdit(row: CommonMaterialReturnListItem) {
     oemFactoryId: row.oemFactoryId,
     commonMaterialName: row.commonMaterialName,
     qty: row.qty,
-    returnedDate: row.returnedDate,
+    returnedDate: (row.returnedDate ?? "").slice(0, 10),
     remark: row.remark ?? "",
   });
   dialogVisible.value = true;
@@ -127,7 +127,9 @@ onMounted(async () => {
       <el-table-column label="回收数量" width="130" align="right">
         <template #default="{ row }">{{ row.qty.toLocaleString() }} {{ row.unit }}</template>
       </el-table-column>
-      <el-table-column prop="returnedDate" label="归还日期" width="120" />
+      <el-table-column label="归还日期" width="120">
+        <template #default="{ row }">{{ (row.returnedDate ?? "").slice(0, 10) }}</template>
+      </el-table-column>
       <el-table-column prop="remark" label="备注" show-overflow-tooltip />
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">

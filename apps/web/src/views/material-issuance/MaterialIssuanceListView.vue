@@ -165,7 +165,7 @@ function openEdit(row: MaterialIssuanceListItem) {
   Object.assign(form, {
     oemFactoryId: row.oemFactoryId,
     productGroupId: row.productGroupId ?? "",
-    issuedDate: row.issuedDate,
+    issuedDate: (row.issuedDate ?? "").slice(0, 10),
     remark: row.remark ?? "",
     imageUrl: row.imageUrl ?? "",
     rows: [
@@ -313,7 +313,9 @@ onMounted(async () => {
       <el-table-column label="数量" width="110" align="right">
         <template #default="{ row }">{{ row.qty.toLocaleString() }} {{ row.unit }}</template>
       </el-table-column>
-      <el-table-column prop="issuedDate" label="发放日期" width="120" />
+      <el-table-column label="发放日期" width="120">
+        <template #default="{ row }">{{ (row.issuedDate ?? "").slice(0, 10) }}</template>
+      </el-table-column>
       <el-table-column label="凭证" width="70" align="center">
         <template #default="{ row }">
           <el-image

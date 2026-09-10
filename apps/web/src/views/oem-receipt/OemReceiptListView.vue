@@ -66,7 +66,7 @@ function openEdit(row: OemReceiptListItem) {
     oemFactoryId: row.oemFactoryId,
     productId: row.productId,
     qty: row.qty,
-    receivedDate: row.receivedDate,
+    receivedDate: (row.receivedDate ?? "").slice(0, 10),
     images: [...row.images],
   });
   dialogVisible.value = true;
@@ -128,7 +128,9 @@ onMounted(async () => {
       <el-table-column label="数量" width="100" align="right">
         <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
       </el-table-column>
-      <el-table-column prop="receivedDate" label="回收日期" width="120" />
+      <el-table-column label="回收日期" width="120">
+        <template #default="{ row }">{{ (row.receivedDate ?? "").slice(0, 10) }}</template>
+      </el-table-column>
       <el-table-column label="凭证" width="160">
         <template #default="{ row }">
           <div v-if="row.images.length" class="thumb-list">

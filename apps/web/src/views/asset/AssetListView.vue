@@ -56,7 +56,7 @@ function openEdit(row: Asset) {
     name: row.name,
     qty: row.qty,
     location: row.location,
-    checkoutDate: row.checkoutDate,
+    checkoutDate: (row.checkoutDate ?? "").slice(0, 10),
     images: [...row.images],
   });
   dialogVisible.value = true;
@@ -112,7 +112,9 @@ onMounted(load);
       <el-table-column prop="name" label="资产名称" show-overflow-tooltip />
       <el-table-column prop="qty" label="数量" width="80" align="right" />
       <el-table-column prop="location" label="存放地点" width="140" show-overflow-tooltip />
-      <el-table-column prop="checkoutDate" label="领用时间" width="120" />
+      <el-table-column label="领用时间" width="120">
+        <template #default="{ row }">{{ (row.checkoutDate ?? "").slice(0, 10) }}</template>
+      </el-table-column>
       <el-table-column label="凭证" width="160">
         <template #default="{ row }">
           <div v-if="row.images.length" class="thumb-list">
