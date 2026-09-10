@@ -15,7 +15,8 @@ async function load() {
   }
 }
 
-// 结余明显是负数——领的料比按配方该用的还少，说明物料去向对不上账，需要人工核查
+// 结余是负数——产品物料是"领的比该用的还少"，通用物料是"发出去的比收回来的还多但记录对不上"，
+// 都说明物料/框去向对不上账，需要人工核查
 function isAbnormal(row: MaterialReconciliationRow) {
   return row.balanceQty < 0;
 }
@@ -33,23 +34,32 @@ onMounted(load);
       type="info"
       :closable="false"
       show-icon
-      title="按 代工厂 + 产品 + 物料 三者汇总。应耗 = 该产品下每条成品回收记录，按对应工序的物料配方算出来的消耗量之和；结余 = 已发 - 应耗，正常应该 ≥ 0，标红说明物料去向对不上账，需要核查"
       style="margin-bottom: 12px"
+      title="产品物料：结余 = 已发 - 应耗（应耗按成品回收 × 工序配方算）。通用物料（框等）：结余 = 已发 - 已回收，不算消耗。结余为负标红，需核查。"
     />
     <el-table v-loading="loading" :data="list" border :row-class-name="rowClassName">
-      <el-table-column prop="oemFactoryName" label="代工厂" width="150" />
-      <el-table-column prop="productGroupName" label="产品" width="150" />
-      <el-table-column prop="materialName" label="物料" width="150" />
-      <el-table-column label="已发放" width="140" align="right">
+      <el-table-column prop="oemFactoryName" label="代工厂" width="130" />
+      <el-table-column prop="productGroupName" label="产品 / 类型" width="130" />
+      <el-table-column prop="materialName" label="物料" width="130" />
+      <el-table-column label="已发放" width="120" align="right">
         <template #default="{ row }">{{ row.issuedQty.toLocaleString() }} {{ row.unit }}</template>
       </el-table-column>
-      <el-table-column label="应耗用" width="140" align="right">
-        <template #default="{ row }">{{ row.consumedQty.toLocaleString() }} {{ row.unit }}</template>
+      <el-table-column label="应耗用" width="120" align="right">
+        <template #default="{ row }">
+          <span v-if="row.kind === 'product'">{{ row.consumedQty.toLocaleString() }} {{ row.unit }}</span>
+          <span v-else class="muted">—</span>
+        </template>
       </el-table-column>
-      <el-table-column label="结余" width="140" align="right">
+      <el-table-column label="已回收" width="120" align="right">
+        <template #default="{ row }">
+          <span v-if="row.kind === 'common'">{{ row.returnedQty.toLocaleString() }} {{ row.unit }}</span>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="结余" width="130" align="right">
         <template #default="{ row }">
           {{ row.balanceQty.toLocaleString() }} {{ row.unit }}
-          <el-tooltip v-if="isAbnormal(row)" content="结余是负数，领的料比按配方该用的还少，物料去向对不上账，建议核查">
+          <el-tooltip v-if="isAbnormal(row)" content="结余是负数，物料/框去向对不上账，建议核查">
             <el-icon class="abnormal-icon"><WarningFilled /></el-icon>
           </el-tooltip>
         </template>
@@ -65,6 +75,10 @@ onMounted(load);
   margin-left: 2px;
   vertical-align: middle;
   cursor: help;
+}
+
+.muted {
+  color: #c0c4cc;
 }
 
 :deep(.balance-abnormal-row td) {

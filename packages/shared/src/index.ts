@@ -8,6 +8,8 @@ export * from "./dashboard";
 export * from "./quantity";
 export * from "./asset";
 export * from "./oem-factory";
+export * from "./common-material";
+export * from "./common-material-return";
 export * from "./material-issuance";
 export * from "./oem-receipt";
 export * from "./oem-reconciliation";

@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance } from "element-plus";
 import type {
+  CommonMaterial,
   CreateMaterialIssuanceDto,
   FactoryListItem,
   MaterialIssuanceListItem,
@@ -11,6 +12,7 @@ import type {
 import { listOemFactories } from "../../api/oem-factory";
 import { listFactories } from "../../api/factory";
 import { listProductGroupsByFactory } from "../../api/product-group";
+import { listCommonMaterials } from "../../api/common-material";
 import {
   createMaterialIssuance,
   deleteMaterialIssuance,
@@ -21,6 +23,7 @@ import {
 const oemFactories = ref<OemFactory[]>([]);
 // 产品是按玩具厂分的，发料时可以给任意玩具厂的产品发，所以全量取一遍
 const productGroups = ref<(ProductGroup & { factoryName: string })[]>([]);
+const commonMaterials = ref<CommonMaterial[]>([]);
 const list = ref<MaterialIssuanceListItem[]>([]);
 const loading = ref(false);
 
@@ -32,28 +35,31 @@ async function loadProductGroups() {
   );
 }
 
-// 选中产品后，物料名下拉的候选项 = 这个产品录入的物料
-const materialOptions = computed(() => {
-  return productGroups.value.find((g) => g.id === form.productGroupId)?.materials ?? [];
-});
+// 物料下拉 = 当前选中产品的物料 + 所有通用物料。用 "p:货号名" / "c:物料名" 区分来源
+const productMaterialOptions = computed(() =>
+  productGroups.value.find((g) => g.id === form.productGroupId)?.materials ?? [],
+);
 
 const dialogVisible = ref(false);
 const dialogMode = ref<"create" | "edit">("create");
 const editingId = ref<string | null>(null);
 const formRef = ref<FormInstance>();
-const form = reactive<CreateMaterialIssuanceDto>({
+const form = reactive({
   oemFactoryId: "",
   productGroupId: "",
-  materialName: "",
+  /** 选中的物料，格式 "p:名字"（产品物料）或 "c:名字"（通用物料） */
+  materialRef: "",
   qty: 0,
   issuedDate: "",
   remark: "",
 });
 
+const isCommonSelected = computed(() => form.materialRef.startsWith("c:"));
+
 const rules = {
   oemFactoryId: [{ required: true, message: "请选择代工厂", trigger: "change" }],
   productGroupId: [{ required: true, message: "请选择产品", trigger: "change" }],
-  materialName: [{ required: true, message: "请选择物料", trigger: "change" }],
+  materialRef: [{ required: true, message: "请选择物料", trigger: "change" }],
   qty: [{ required: true, message: "请输入数量", trigger: "blur" }],
   issuedDate: [{ required: true, message: "请选择发放日期", trigger: "change" }],
 };
@@ -68,7 +74,7 @@ async function load() {
 }
 
 function resetForm() {
-  Object.assign(form, { oemFactoryId: "", productGroupId: "", materialName: "", qty: 0, issuedDate: "", remark: "" });
+  Object.assign(form, { oemFactoryId: "", productGroupId: "", materialRef: "", qty: 0, issuedDate: "", remark: "" });
 }
 
 function openCreate() {
@@ -83,8 +89,8 @@ function openEdit(row: MaterialIssuanceListItem) {
   editingId.value = row.id;
   Object.assign(form, {
     oemFactoryId: row.oemFactoryId,
-    productGroupId: row.productGroupId,
-    materialName: row.materialName,
+    productGroupId: row.productGroupId ?? "",
+    materialRef: row.productGroupId ? `p:${row.materialName}` : `c:${row.materialName}`,
     qty: row.qty,
     issuedDate: row.issuedDate,
     remark: row.remark ?? "",
@@ -92,19 +98,30 @@ function openEdit(row: MaterialIssuanceListItem) {
   dialogVisible.value = true;
 }
 
-// 换产品时，原来选的物料可能不属于新产品，清掉
+// 换产品时，原来选的产品物料可能不属于新产品，清掉（通用物料不受影响）
 function onProductGroupChange() {
-  if (!materialOptions.value.some((m) => m.name === form.materialName)) {
-    form.materialName = "";
+  if (form.materialRef.startsWith("p:")) {
+    const name = form.materialRef.slice(2);
+    if (!productMaterialOptions.value.some((m) => m.name === name)) form.materialRef = "";
   }
 }
 
 async function handleSubmit() {
   await formRef.value?.validate();
+  const materialName = form.materialRef.slice(2);
+  const dto: CreateMaterialIssuanceDto = {
+    oemFactoryId: form.oemFactoryId,
+    materialName,
+    qty: form.qty,
+    issuedDate: form.issuedDate,
+    remark: form.remark,
+    // 通用物料不带产品；产品物料带上所属产品
+    ...(isCommonSelected.value ? {} : { productGroupId: form.productGroupId }),
+  };
   if (dialogMode.value === "create") {
-    await createMaterialIssuance(form);
+    await createMaterialIssuance(dto);
   } else if (editingId.value) {
-    await updateMaterialIssuance(editingId.value, form);
+    await updateMaterialIssuance(editingId.value, dto);
   }
   ElMessage.success("保存成功");
   dialogVisible.value = false;
@@ -124,7 +141,7 @@ async function handleDelete(row: MaterialIssuanceListItem) {
 
 onMounted(async () => {
   oemFactories.value = await listOemFactories();
-  await loadProductGroups();
+  await Promise.all([loadProductGroups(), listCommonMaterials().then((v) => (commonMaterials.value = v))]);
   load();
 });
 </script>
@@ -137,7 +154,7 @@ onMounted(async () => {
 
     <el-table v-loading="loading" :data="list" border>
       <el-table-column prop="oemFactoryName" label="代工厂" width="140" />
-      <el-table-column prop="productGroupName" label="产品" width="140" />
+      <el-table-column prop="productGroupName" label="产品 / 类型" width="140" />
       <el-table-column prop="materialName" label="物料" width="140" />
       <el-table-column label="数量" width="120" align="right">
         <template #default="{ row }">{{ row.qty.toLocaleString() }} {{ row.unit }}</template>
@@ -169,9 +186,24 @@ onMounted(async () => {
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="物料" prop="materialName">
-          <el-select v-model="form.materialName" filterable :disabled="!form.productGroupId" style="width: 100%">
-            <el-option v-for="m in materialOptions" :key="m.name" :label="`${m.name}（${m.unit}）`" :value="m.name" />
+        <el-form-item label="物料" prop="materialRef">
+          <el-select v-model="form.materialRef" filterable :disabled="!form.productGroupId" style="width: 100%">
+            <el-option-group label="本产品物料">
+              <el-option
+                v-for="m in productMaterialOptions"
+                :key="`p:${m.name}`"
+                :label="`${m.name}${m.unit ? `（${m.unit}）` : ''}`"
+                :value="`p:${m.name}`"
+              />
+            </el-option-group>
+            <el-option-group label="通用物料">
+              <el-option
+                v-for="m in commonMaterials"
+                :key="`c:${m.name}`"
+                :label="`${m.name}（${m.unit}）`"
+                :value="`c:${m.name}`"
+              />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="数量" prop="qty">

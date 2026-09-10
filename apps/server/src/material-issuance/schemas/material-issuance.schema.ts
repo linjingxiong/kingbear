@@ -7,8 +7,9 @@ export class MaterialIssuance extends Document {
   @Prop({ type: Types.ObjectId, ref: 'OemFactory', required: true, index: true })
   oemFactoryId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'ProductGroup', required: true, index: true })
-  productGroupId: Types.ObjectId;
+  /** 通用物料（框等）发放时留空 */
+  @Prop({ type: Types.ObjectId, ref: 'ProductGroup', index: true })
+  productGroupId?: Types.ObjectId;
 
   @Prop({ required: true })
   materialName: string;

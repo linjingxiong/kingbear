@@ -1,23 +1,19 @@
 import { IsDateString, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
-export class CreateMaterialIssuanceDto {
+export class CreateCommonMaterialReturnDto {
   @IsMongoId()
   oemFactoryId: string;
 
-  @IsOptional()
-  @IsMongoId()
-  productGroupId?: string;
-
   @IsString()
   @IsNotEmpty()
-  materialName: string;
+  commonMaterialName: string;
 
   @IsNumber()
   @Min(0)
   qty: number;
 
   @IsDateString()
-  issuedDate: string;
+  returnedDate: string;
 
   @IsOptional()
   @IsString()

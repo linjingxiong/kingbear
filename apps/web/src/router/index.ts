@@ -62,6 +62,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "代工厂管理" },
       },
       {
+        path: "common-material",
+        name: "common-material",
+        component: () => import("../views/common-material/CommonMaterialListView.vue"),
+        meta: { title: "通用物料" },
+      },
+      {
+        path: "common-material-return",
+        name: "common-material-return",
+        component: () => import("../views/common-material-return/CommonMaterialReturnListView.vue"),
+        meta: { title: "通用物料回收" },
+      },
+      {
         path: "material-issuance",
         name: "material-issuance",
         component: () => import("../views/material-issuance/MaterialIssuanceListView.vue"),
