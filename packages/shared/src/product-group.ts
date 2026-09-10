@@ -16,7 +16,7 @@ export interface ProductGroup {
 
 export interface ProductGroupMaterial {
   name: string;
-  /** 计量单位，比如"斤""个""米" */
+  /** 计量单位，比如"斤""个""米"，选填（没填就是空字符串） */
   unit: string;
 }
 

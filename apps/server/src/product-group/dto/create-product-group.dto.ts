@@ -6,9 +6,9 @@ export class ProductGroupMaterialDto {
   @IsNotEmpty()
   name: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  unit: string;
+  unit?: string;
 }
 
 export class CreateProductGroupDto {

@@ -143,10 +143,10 @@ function openGroupEdit(node: GroupNode) {
 }
 async function submitGroup() {
   await groupFormRef.value?.validate();
-  // 名字或单位没填全的物料行不提交（用 ?? 兜一下，别因为某行数据异常整个保存静默失败）
+  // 只要填了物料名就保存，单位选填；两个都空的行才丢掉
   const materials = groupForm.materials
     .map((m) => ({ name: (m.name ?? "").trim(), unit: (m.unit ?? "").trim() }))
-    .filter((m) => m.name && m.unit);
+    .filter((m) => m.name);
   if (groupDialogMode.value === "create") {
     await createProductGroup({ ...groupForm, materials });
   } else if (groupEditingId.value) {
@@ -356,7 +356,7 @@ onMounted(loadFactories);
           <div class="material-editor">
             <div v-for="(m, idx) in groupForm.materials" :key="idx" class="material-row">
               <el-input v-model="m.name" placeholder="物料名，如：塑料A" style="width: 220px" />
-              <el-input v-model="m.unit" placeholder="单位，如：斤" style="width: 100px" />
+              <el-input v-model="m.unit" placeholder="单位（选填），如：斤" style="width: 130px" />
               <el-button link type="danger" @click="removeGroupMaterial(idx)">删除</el-button>
             </div>
             <el-button @click="addGroupMaterial">+ 添加物料</el-button>

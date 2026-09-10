@@ -1,13 +1,13 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
-/** 本产品用到的一种物料——名字 + 单位，新建产品时直接录入，没有全局物料目录 */
+/** 本产品用到的一种物料——名字必填，单位选填，新建产品时直接录入，没有全局物料目录 */
 @Schema({ _id: false })
 export class ProductGroupMaterial {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ required: true })
+  @Prop({ default: '' })
   unit: string;
 }
 export const ProductGroupMaterialSchema = SchemaFactory.createForClass(ProductGroupMaterial);
