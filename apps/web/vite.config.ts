@@ -22,9 +22,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 开发环境：/api 和 /uploads 转发到本地跑的 NestJS（默认 3000 端口）
-      "/api": { target: "http://localhost:3000", changeOrigin: true },
-      "/uploads": { target: "http://localhost:3000", changeOrigin: true },
+      // 开发环境：/api 和 /uploads 转发到本地跑的 NestJS。默认 3000 端口（本机 `pnpm dev:server`
+      // 的默认端口，不改行为）；部署机器上的 kingbear-web-dev 容器会用 VITE_DEV_API_TARGET
+      // 指向独立的 kingbear-server-dev（3001 端口），这样后端也能热更新，不用等 docker build
+      "/api": { target: process.env.VITE_DEV_API_TARGET ?? "http://localhost:3000", changeOrigin: true },
+      "/uploads": { target: process.env.VITE_DEV_API_TARGET ?? "http://localhost:3000", changeOrigin: true },
     },
   },
 });

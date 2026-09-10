@@ -72,6 +72,41 @@ docker compose up -d --build
 > `mongo` 只需要给同一个 compose 网络里的 `server` 容器用，`docker-compose.yml` 里现在是
 > `expose`（只在容器网络内可见），不要为了"本机用工具连一下库"方便又改回 `ports` 映射。
 
+## 快速开发预览（不用等 docker build）
+
+正式部署（上一节）每次都要重新 build 镜像，改一点代码等好几分钟才能看到效果，开发调试
+阶段太慢。部署机器上另外常驻了两个"开发模式"容器，代码改了直接生效，不用 build，
+跟正式的 `web`/`server` 容器（80/3000 端口）互不影响：
+
+- `kingbear-web-dev`（5173 端口）：Vite 开发服务器，绑定挂载整个仓库，改完 `git pull`
+  前端就热更新
+- `kingbear-server-dev`（3001 端口）：`nest start --watch`，改完 `git pull` 后端自动重启；
+  接的是同一个 `mongo`（跟 `kingbear-git_default` 这个 compose 网络在一起），`kingbear-web-dev`
+  的 `/api`、`/uploads` 代理通过 `VITE_DEV_API_TARGET=http://localhost:3001` 指到这里，
+  不是指向正式的 `server` 容器
+
+用法：改完代码 `git pull` 一下（这两个容器不用重启，Vite HMR / nest watch 自动生效；
+如果改的是 `packages/shared`，要手动进 `kingbear-web-dev` 容器里 `pnpm --filter
+@kingbear/shared build` 一下，编译产物不会自动重新生成），浏览器打开
+`http://<部署机器IP>:5173` 直接看效果。确认没问题了，再按上一节的正式流程
+`docker compose build && up -d` 部署到 80/3000 端口。
+
+这两个容器不在 `docker-compose.yml` 里，是临时起的，宿主机重启后不会自动拉起来，
+需要手动 `docker start` 一下（或者重新用下面这套命令建）：
+
+```bash
+# 前端开发容器
+docker run -d --name kingbear-web-dev --network host \
+  -v ~/kingbear-git:/repo -w /repo/apps/web \
+  node:18-alpine sh -c "corepack enable && pnpm exec vite --host 0.0.0.0 --port 5173"
+
+# 后端开发容器：跟正式部署共用同一个 .env，挂到 mongo 所在的 compose 网络里
+docker run -d --name kingbear-server-dev --network kingbear-git_default -p 3001:3000 \
+  --env-file ~/kingbear-git/.env -e MONGO_URI=mongodb://mongo:27017/kingbear \
+  -v ~/kingbear-git:/repo -w /repo/apps/server \
+  node:18-alpine sh -c "corepack enable && pnpm exec nest start --watch"
+```
+
 ## 数据库备份
 
 之前被勒索软件清空过一次数据（见上面那条端口安全警告），光靠"以后不犯这个错"不够
