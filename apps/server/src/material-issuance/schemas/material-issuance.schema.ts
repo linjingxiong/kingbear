@@ -22,6 +22,10 @@ export class MaterialIssuance extends Document {
 
   @Prop()
   remark?: string;
+
+  /** 发料单图片（拍照识别录入时留存），同一张发料单拆出的多条记录共用一个 URL */
+  @Prop()
+  imageUrl?: string;
 }
 
 export const MaterialIssuanceSchema = SchemaFactory.createForClass(MaterialIssuance);

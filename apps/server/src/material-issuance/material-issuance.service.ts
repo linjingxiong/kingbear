@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { MaterialIssuance } from './schemas/material-issuance.schema';
 import { OemFactory } from '../oem-factory/schemas/oem-factory.schema';
 import { ProductGroup } from '../product-group/schemas/product-group.schema';
 import { CommonMaterial } from '../common-material/schemas/common-material.schema';
+import { OCR_PROVIDER } from '../ocr/ocr.module';
+import type { OcrProvider } from '../ocr/ocr.types';
 import { CreateMaterialIssuanceDto } from './dto/create-material-issuance.dto';
 import { UpdateMaterialIssuanceDto } from './dto/update-material-issuance.dto';
 
@@ -30,10 +32,16 @@ export class MaterialIssuanceService {
     @InjectModel(OemFactory.name) private readonly oemFactoryModel: Model<OemFactory>,
     @InjectModel(ProductGroup.name) private readonly productGroupModel: Model<ProductGroup>,
     @InjectModel(CommonMaterial.name) private readonly commonMaterialModel: Model<CommonMaterial>,
+    @Inject(OCR_PROVIDER) private readonly ocr: OcrProvider,
   ) {}
 
   create(dto: CreateMaterialIssuanceDto) {
     return this.issuanceModel.create(dto);
+  }
+
+  /** 发料单图片 OCR 识别，只返回识别结果，不建记录 */
+  recognize(imagePath: string) {
+    return this.ocr.recognizeMaterialDispatchImage(imagePath);
   }
 
   /**

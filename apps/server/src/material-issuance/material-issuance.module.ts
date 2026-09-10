@@ -4,11 +4,13 @@ import { MaterialIssuance, MaterialIssuanceSchema } from './schemas/material-iss
 import { OemFactory, OemFactorySchema } from '../oem-factory/schemas/oem-factory.schema';
 import { ProductGroup, ProductGroupSchema } from '../product-group/schemas/product-group.schema';
 import { CommonMaterial, CommonMaterialSchema } from '../common-material/schemas/common-material.schema';
+import { OcrModule } from '../ocr/ocr.module';
 import { MaterialIssuanceService } from './material-issuance.service';
 import { MaterialIssuanceController } from './material-issuance.controller';
 
 @Module({
   imports: [
+    OcrModule,
     MongooseModule.forFeature([
       { name: MaterialIssuance.name, schema: MaterialIssuanceSchema },
       { name: OemFactory.name, schema: OemFactorySchema },

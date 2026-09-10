@@ -12,6 +12,8 @@ export interface MaterialIssuance {
   /** 发放日期，"YYYY-MM-DD" */
   issuedDate: string;
   remark?: string;
+  /** 发料单图片，拍照识别录入时留存 */
+  imageUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,6 +34,16 @@ export interface CreateMaterialIssuanceDto {
   qty: number;
   issuedDate: string;
   remark?: string;
+  imageUrl?: string;
 }
 
 export type UpdateMaterialIssuanceDto = Partial<CreateMaterialIssuanceDto>;
+
+/** 发料单 OCR 识别结果（POST /material-issuances/recognize 返回，再带上 imageUrl） */
+export interface MaterialDispatchOcrResult {
+  imageUrl: string;
+  oemFactoryName: string | null;
+  productName: string | null;
+  date: string | null;
+  items: { materialName: string; qty: number }[];
+}

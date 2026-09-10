@@ -18,8 +18,28 @@ export interface OcrRawItem {
   qtyDeclared: number | null;
 }
 
+/** 发料单识别结果：发给哪个代工厂、哪个产品、日期、一列物料和数量 */
+export interface MaterialDispatchOcrResult {
+  /** 代工厂名称，识别失败给 null */
+  oemFactoryName: string | null;
+  /** 产品名称，识别失败给 null */
+  productName: string | null;
+  /** 发放日期，yyyy-MM-dd，识别失败给 null */
+  date: string | null;
+  items: MaterialDispatchOcrItem[];
+}
+
+export interface MaterialDispatchOcrItem {
+  /** 物料名 */
+  materialName: string;
+  /** 发放数量 */
+  qty: number;
+}
+
 /** OCR Provider 统一接口：换供应商（Claude / GPT-4V / 通义千问VL...）只用改这一层的实现 */
 export interface OcrProvider {
   /** imagePath 是图片在本地磁盘上的真实路径（不是对外的 /uploads URL） */
   recognizeInboundImage(imagePath: string): Promise<OcrRawResult>;
+  /** 发料单识别 */
+  recognizeMaterialDispatchImage(imagePath: string): Promise<MaterialDispatchOcrResult>;
 }

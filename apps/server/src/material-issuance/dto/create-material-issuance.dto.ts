@@ -22,4 +22,8 @@ export class CreateMaterialIssuanceDto {
   @IsOptional()
   @IsString()
   remark?: string;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }

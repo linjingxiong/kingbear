@@ -2,7 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFile } from 'fs/promises';
 import { extname } from 'path';
-import type { OcrProvider, OcrRawItem, OcrRawResult } from '../ocr.types';
+import type {
+  MaterialDispatchOcrItem,
+  MaterialDispatchOcrResult,
+  OcrProvider,
+  OcrRawItem,
+  OcrRawResult,
+} from '../ocr.types';
 
 // 阿里云 DashScope 的 OpenAI 兼容模式端点，通义千问 VL 系列模型都走这个
 // https://help.aliyun.com/zh/model-studio/developer-reference/compatibility-of-openai-with-dashscope
@@ -44,6 +50,31 @@ function buildSystemPrompt(): string {
 - 完全看不清或者不是入库单据的情况下，factoryName/date 给 null，items 给空数组`;
 }
 
+/** 每次调用都重新生成，年份用"现在" */
+function buildDispatchSystemPrompt(): string {
+  const currentYear = new Date().getFullYear();
+  return `你是玩具加工厂的发料单据识别助手。用户会给你一张"发料单"的照片——把物料发给某个代工厂时开的单据，
+上面一般包含：代工厂名称、产品名称（可选）、日期、若干行物料明细（物料名、数量）。
+
+只输出一个 JSON 对象，不要输出任何解释文字、不要用 markdown 代码块包裹，格式：
+
+{
+  "oemFactoryName": "代工厂名称，识别不到给 null",
+  "productName": "产品名称，识别不到给 null",
+  "date": "发放日期，格式 yyyy-MM-dd，识别不到给 null",
+  "items": [
+    { "materialName": "物料名", "qty": 数量（纯数字，不带单位） }
+  ]
+}
+
+注意：
+- qty 必须是 JSON number，不带单位、不用字符串
+- 单据上有多行物料，items 要包含所有行
+- 日期只写两位年份（如"26年8月2日"）一律理解成 20xx 年；完全没写年份就按 ${currentYear} 年，
+  月、日照单据上的数字来，不要因为年份不确定就丢掉整个 date
+- 完全看不清或者不是发料单，各字段给 null，items 给空数组`;
+}
+
 /** 通义千问 VL（阿里云 DashScope）的 OCR Provider 实现 */
 @Injectable()
 export class QwenVlOcrProvider implements OcrProvider {
@@ -52,51 +83,58 @@ export class QwenVlOcrProvider implements OcrProvider {
   constructor(private readonly configService: ConfigService) {}
 
   async recognizeInboundImage(imagePath: string): Promise<OcrRawResult> {
+    const content = await this.callQwenVl(imagePath, buildSystemPrompt(), '请识别这张入库单据图片，按要求的 JSON 格式输出。');
+    if (content == null) return emptyResult();
+    return parseResult(content, this.logger);
+  }
+
+  async recognizeMaterialDispatchImage(imagePath: string): Promise<MaterialDispatchOcrResult> {
+    const content = await this.callQwenVl(
+      imagePath,
+      buildDispatchSystemPrompt(),
+      '请识别这张发料单图片，按要求的 JSON 格式输出。',
+    );
+    if (content == null) return emptyDispatchResult();
+    return parseDispatchResult(content, this.logger);
+  }
+
+  /** 调一次通义千问 VL，返回模型输出的文本；出错返回 null */
+  private async callQwenVl(imagePath: string, systemPrompt: string, userText: string): Promise<string | null> {
     const apiKey = this.configService.get<string>('ocr.apiKey');
     if (!apiKey) {
       this.logger.warn('OCR_API_KEY 未配置，无法调用通义千问 VL，回退为空结果走人工录入');
-      return emptyResult();
+      return null;
     }
-
     try {
       const imageDataUri = await toDataUri(imagePath);
       const model = this.configService.get<string>('ocr.model') || 'qwen-vl-plus';
-
       const response = await fetch(DASHSCOPE_ENDPOINT, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
           messages: [
-            { role: 'system', content: buildSystemPrompt() },
+            { role: 'system', content: systemPrompt },
             {
               role: 'user',
               content: [
                 { type: 'image_url', image_url: { url: imageDataUri } },
-                { type: 'text', text: '请识别这张入库单据图片，按要求的 JSON 格式输出。' },
+                { type: 'text', text: userText },
               ],
             },
           ],
         }),
       });
-
       if (!response.ok) {
         const errText = await response.text();
         this.logger.error(`通义千问 VL 调用失败 (HTTP ${response.status}): ${errText}`);
-        return emptyResult();
+        return null;
       }
-
-      const data = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-      const content = data.choices?.[0]?.message?.content ?? '';
-      return parseResult(content, this.logger);
+      const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      return data.choices?.[0]?.message?.content ?? '';
     } catch (err) {
       this.logger.error(`通义千问 VL 调用异常: ${(err as Error).message}`);
-      return emptyResult();
+      return null;
     }
   }
 }
@@ -170,4 +208,29 @@ function toNum(value: unknown): number {
 
 function emptyResult(): OcrRawResult {
   return { factoryName: null, date: null, items: [] };
+}
+
+function emptyDispatchResult(): MaterialDispatchOcrResult {
+  return { oemFactoryName: null, productName: null, date: null, items: [] };
+}
+
+function parseDispatchResult(content: string, logger: Logger): MaterialDispatchOcrResult {
+  try {
+    const parsed = JSON.parse(extractJsonText(content)) as Partial<MaterialDispatchOcrResult>;
+    const items: MaterialDispatchOcrItem[] = Array.isArray(parsed.items)
+      ? parsed.items
+          .filter((it): it is MaterialDispatchOcrItem => !!it && typeof it === 'object')
+          .map((it) => ({ materialName: toStr(it.materialName), qty: toNum(it.qty) }))
+          .filter((it) => it.materialName)
+      : [];
+    return {
+      oemFactoryName: parsed.oemFactoryName ? toStr(parsed.oemFactoryName) : null,
+      productName: parsed.productName ? toStr(parsed.productName) : null,
+      date: parsed.date ? toStr(parsed.date) : null,
+      items,
+    };
+  } catch (err) {
+    logger.error(`通义千问 VL 发料单返回不是合法 JSON: ${(err as Error).message}\n原始返回: ${content}`);
+    return emptyDispatchResult();
+  }
 }
