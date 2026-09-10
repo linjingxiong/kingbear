@@ -143,8 +143,10 @@ function openGroupEdit(node: GroupNode) {
 }
 async function submitGroup() {
   await groupFormRef.value?.validate();
-  // 名字或单位没填全的物料行不提交
-  const materials = groupForm.materials.filter((m) => m.name.trim() && m.unit.trim());
+  // 名字或单位没填全的物料行不提交（用 ?? 兜一下，别因为某行数据异常整个保存静默失败）
+  const materials = groupForm.materials
+    .map((m) => ({ name: (m.name ?? "").trim(), unit: (m.unit ?? "").trim() }))
+    .filter((m) => m.name && m.unit);
   if (groupDialogMode.value === "create") {
     await createProductGroup({ ...groupForm, materials });
   } else if (groupEditingId.value) {
