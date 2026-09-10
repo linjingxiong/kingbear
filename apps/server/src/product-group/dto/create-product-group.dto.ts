@@ -1,4 +1,15 @@
-import { IsArray, IsMongoId, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsMongoId, IsNotEmpty, IsOptional, IsString, ValidateNested } from 'class-validator';
+
+export class ProductGroupMaterialDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsString()
+  @IsNotEmpty()
+  unit: string;
+}
 
 export class CreateProductGroupDto {
   @IsMongoId()
@@ -14,6 +25,7 @@ export class CreateProductGroupDto {
 
   @IsOptional()
   @IsArray()
-  @IsMongoId({ each: true })
-  materialIds?: string[];
+  @ValidateNested({ each: true })
+  @Type(() => ProductGroupMaterialDto)
+  materials?: ProductGroupMaterialDto[];
 }

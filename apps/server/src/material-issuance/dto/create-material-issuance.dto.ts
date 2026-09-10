@@ -1,11 +1,15 @@
-import { IsDateString, IsMongoId, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsDateString, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateMaterialIssuanceDto {
   @IsMongoId()
   oemFactoryId: string;
 
   @IsMongoId()
-  materialId: string;
+  productGroupId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  materialName: string;
 
   @IsNumber()
   @Min(0)

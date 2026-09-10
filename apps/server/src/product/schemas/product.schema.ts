@@ -1,11 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
-/** 这道工序（货号）用某种物料的用量——materialId 指向全局物料目录，配比是手动录入的数字 */
+/** 这道工序（货号）用某种物料的用量——materialName 是所属产品物料清单里的名字，qty 是每单位货号的用量 */
 @Schema({ _id: false })
 export class ProductMaterial {
-  @Prop({ type: Types.ObjectId, ref: 'Material', required: true })
-  materialId: Types.ObjectId;
+  @Prop({ required: true })
+  materialName: string;
 
   @Prop({ required: true })
   qty: number;
@@ -42,7 +42,7 @@ export class Product extends Document {
   @Prop()
   remark?: string;
 
-  /** 物料配方：这道工序耗哪些物料、各耗多少，代工厂成品回收后按这个算应耗物料 */
+  /** 物料配方：这道工序耗哪些物料、各耗多少（物料名来自所属产品的物料清单） */
   @Prop({ type: [ProductMaterialSchema], default: [] })
   materials: ProductMaterial[];
 }

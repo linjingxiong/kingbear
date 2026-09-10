@@ -15,7 +15,6 @@ import { BillingModule } from './billing/billing.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AssetModule } from './asset/asset.module';
 import { OemFactoryModule } from './oem-factory/oem-factory.module';
-import { MaterialModule } from './material/material.module';
 import { MaterialIssuanceModule } from './material-issuance/material-issuance.module';
 import { OemReceiptModule } from './oem-receipt/oem-receipt.module';
 import { OemReconciliationModule } from './oem-reconciliation/oem-reconciliation.module';
@@ -44,7 +43,6 @@ import { OemReconciliationModule } from './oem-reconciliation/oem-reconciliation
     DashboardModule,
     AssetModule,
     OemFactoryModule,
-    MaterialModule,
     MaterialIssuanceModule,
     OemReceiptModule,
     OemReconciliationModule,

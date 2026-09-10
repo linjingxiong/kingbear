@@ -1,6 +1,6 @@
-/** 这道工序（货号）用某种物料的用量——物料从全局物料目录里选，配比手动录入 */
+/** 这道工序（货号）用某种物料的用量——物料名来自所属产品的物料清单，配比（每单位货号的用量）手动录入 */
 export interface ProductMaterial {
-  materialId: string;
+  materialName: string;
   qty: number;
 }
 

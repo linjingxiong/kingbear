@@ -33,12 +33,13 @@ onMounted(load);
       type="info"
       :closable="false"
       show-icon
-      title="应耗 = 每条成品回收记录按对应工序的物料配方算出来的物料消耗量之和；结余 = 已发 - 应耗，正常应该 ≥ 0，标红说明物料去向对不上账，需要核查"
+      title="按 代工厂 + 产品 + 物料 三者汇总。应耗 = 该产品下每条成品回收记录，按对应工序的物料配方算出来的消耗量之和；结余 = 已发 - 应耗，正常应该 ≥ 0，标红说明物料去向对不上账，需要核查"
       style="margin-bottom: 12px"
     />
     <el-table v-loading="loading" :data="list" border :row-class-name="rowClassName">
-      <el-table-column prop="oemFactoryName" label="代工厂" width="160" />
-      <el-table-column prop="materialName" label="物料" width="160" />
+      <el-table-column prop="oemFactoryName" label="代工厂" width="150" />
+      <el-table-column prop="productGroupName" label="产品" width="150" />
+      <el-table-column prop="materialName" label="物料" width="150" />
       <el-table-column label="已发放" width="140" align="right">
         <template #default="{ row }">{{ row.issuedQty.toLocaleString() }} {{ row.unit }}</template>
       </el-table-column>

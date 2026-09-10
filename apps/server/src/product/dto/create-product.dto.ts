@@ -1,6 +1,15 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
-import { ProductMaterialDto } from './product-material.dto';
+
+export class ProductMaterialDto {
+  @IsString()
+  @IsNotEmpty()
+  materialName: string;
+
+  @IsNumber()
+  @Min(0)
+  qty: number;
+}
 
 export class CreateProductDto {
   @IsMongoId()

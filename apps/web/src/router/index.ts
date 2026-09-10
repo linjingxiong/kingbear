@@ -62,12 +62,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "代工厂管理" },
       },
       {
-        path: "material",
-        name: "material",
-        component: () => import("../views/material/MaterialListView.vue"),
-        meta: { title: "物料管理" },
-      },
-      {
         path: "material-issuance",
         name: "material-issuance",
         component: () => import("../views/material-issuance/MaterialIssuanceListView.vue"),
