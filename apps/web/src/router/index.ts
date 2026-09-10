@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import("../views/billing/BillingView.vue"),
         meta: { title: "应收账单" },
       },
+      {
+        path: "asset",
+        name: "asset",
+        component: () => import("../views/asset/AssetListView.vue"),
+        meta: { title: "资产盘点" },
+      },
     ],
   },
 ];

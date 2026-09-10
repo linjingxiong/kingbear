@@ -23,7 +23,13 @@ const menuItems = [
       { path: "/product", title: "产品管理" },
     ],
   },
-  { title: "业务管理", children: [{ path: "/inbound", title: "入库管理" }] },
+  {
+    title: "业务管理",
+    children: [
+      { path: "/inbound", title: "入库管理" },
+      { path: "/asset", title: "资产盘点" },
+    ],
+  },
   { title: "财务管理", children: [{ path: "/billing", title: "应收账单" }] },
 ];
 

@@ -12,6 +12,7 @@ import { InboundModule } from './inbound/inbound.module';
 import { OcrModule } from './ocr/ocr.module';
 import { BillingModule } from './billing/billing.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AssetModule } from './asset/asset.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     InboundModule,
     BillingModule,
     DashboardModule,
+    AssetModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
 })
