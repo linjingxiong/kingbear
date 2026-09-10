@@ -55,6 +55,36 @@ const routes: RouteRecordRaw[] = [
         component: () => import("../views/asset/AssetListView.vue"),
         meta: { title: "资产盘点" },
       },
+      {
+        path: "oem-factory",
+        name: "oem-factory",
+        component: () => import("../views/oem-factory/OemFactoryListView.vue"),
+        meta: { title: "代工厂管理" },
+      },
+      {
+        path: "material",
+        name: "material",
+        component: () => import("../views/material/MaterialListView.vue"),
+        meta: { title: "物料管理" },
+      },
+      {
+        path: "material-issuance",
+        name: "material-issuance",
+        component: () => import("../views/material-issuance/MaterialIssuanceListView.vue"),
+        meta: { title: "物料发放" },
+      },
+      {
+        path: "oem-receipt",
+        name: "oem-receipt",
+        component: () => import("../views/oem-receipt/OemReceiptListView.vue"),
+        meta: { title: "成品回收" },
+      },
+      {
+        path: "oem-reconciliation",
+        name: "oem-reconciliation",
+        component: () => import("../views/oem-reconciliation/OemReconciliationView.vue"),
+        meta: { title: "物料对账" },
+      },
     ],
   },
 ];

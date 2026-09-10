@@ -31,6 +31,16 @@ const menuItems = [
     ],
   },
   { title: "财务管理", children: [{ path: "/billing", title: "应收账单" }] },
+  {
+    title: "代工厂管理",
+    children: [
+      { path: "/oem-factory", title: "代工厂管理" },
+      { path: "/material", title: "物料管理" },
+      { path: "/material-issuance", title: "物料发放" },
+      { path: "/oem-receipt", title: "成品回收" },
+      { path: "/oem-reconciliation", title: "物料对账" },
+    ],
+  },
 ];
 
 watch(

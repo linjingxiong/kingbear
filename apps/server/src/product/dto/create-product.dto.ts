@@ -1,4 +1,6 @@
-import { IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ProcessStepDto } from './process-step.dto';
 
 export class CreateProductDto {
   @IsMongoId()
@@ -24,4 +26,10 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   remark?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProcessStepDto)
+  processes?: ProcessStepDto[];
 }

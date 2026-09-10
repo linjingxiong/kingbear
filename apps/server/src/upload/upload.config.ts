@@ -44,6 +44,11 @@ export function assetImageMulterOptions(uploadDir: string) {
   return imageMulterOptions(uploadDir, 'assets');
 }
 
+/** 代工厂成品回收凭证图片 */
+export function oemReceiptImageMulterOptions(uploadDir: string) {
+  return imageMulterOptions(uploadDir, 'oem-receipts');
+}
+
 /** 相对 uploadDir 的存储路径 → 对外可访问的 URL（main.ts 里把 uploadDir 静态暴露在 /uploads） */
 export function toPublicUploadUrl(uploadDir: string, absoluteFilePath: string) {
   const relative = absoluteFilePath.split(uploadDir).pop()!.replace(/\\/g, '/');
