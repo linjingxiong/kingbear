@@ -20,8 +20,7 @@ const menuItems = [
     title: "基础资料",
     children: [
       { path: "/factory", title: "玩具厂管理" },
-      { path: "/product-group", title: "产品管理" },
-      { path: "/product", title: "工序管理" },
+      { path: "/product", title: "产品管理" },
     ],
   },
   {

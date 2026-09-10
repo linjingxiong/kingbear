@@ -26,16 +26,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "玩具厂管理" },
       },
       {
-        path: "product-group",
-        name: "product-group",
-        component: () => import("../views/product-group/ProductGroupListView.vue"),
-        meta: { title: "产品管理" },
-      },
-      {
         path: "product",
         name: "product",
         component: () => import("../views/product/ProductListView.vue"),
-        meta: { title: "工序管理" },
+        meta: { title: "产品管理" },
       },
       {
         path: "inbound",
