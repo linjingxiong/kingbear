@@ -107,7 +107,7 @@ onMounted(load);
       <el-button type="primary" @click="openCreate">新增资产领用</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border size="small">
       <el-table-column prop="custodian" label="资产管理人" width="120" />
       <el-table-column prop="name" label="资产名称" show-overflow-tooltip />
       <el-table-column prop="qty" label="数量" width="80" align="right" />
@@ -199,10 +199,11 @@ onMounted(load);
 }
 
 .thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
   cursor: zoom-in;
+  vertical-align: middle;
 }
 
 .no-image {

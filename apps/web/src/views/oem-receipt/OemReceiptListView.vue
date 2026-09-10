@@ -121,7 +121,7 @@ onMounted(async () => {
       <el-button type="primary" @click="openCreate">新增成品回收</el-button>
     </div>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border size="small">
       <el-table-column prop="oemFactoryName" label="代工厂" width="140" />
       <el-table-column prop="productSku" label="货号" width="120" />
       <el-table-column prop="productName" label="工序名称" show-overflow-tooltip />
@@ -216,10 +216,11 @@ onMounted(async () => {
 }
 
 .thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
   cursor: zoom-in;
+  vertical-align: middle;
 }
 
 .no-image {

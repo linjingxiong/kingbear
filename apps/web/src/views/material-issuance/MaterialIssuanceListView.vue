@@ -306,7 +306,7 @@ onMounted(async () => {
       </template>
     </el-alert>
 
-    <el-table v-loading="loading" :data="list" border>
+    <el-table v-loading="loading" :data="list" border size="small">
       <el-table-column prop="oemFactoryName" label="代工厂" width="130" />
       <el-table-column prop="productGroupName" label="产品 / 类型" width="130" />
       <el-table-column prop="materialName" label="物料" width="130" />
@@ -408,10 +408,11 @@ onMounted(async () => {
   gap: 12px;
 }
 .thumb {
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
   cursor: zoom-in;
+  vertical-align: middle;
 }
 .slip-preview {
   max-width: 100%;
