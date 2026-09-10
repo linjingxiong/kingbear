@@ -27,7 +27,7 @@ const groups = ref<ProductGroup[]>([]);
 const steps = ref<Product[]>([]);
 const loading = ref(false);
 
-function materialsSummary(row: Product) {
+function stepRecipeText(row: Product) {
   return row.materials.map((m) => `${m.materialName}×${m.qty}`).join("、");
 }
 
@@ -40,6 +40,7 @@ type GroupNode = {
   name: string;
   virtual: boolean;
   materialCount: number;
+  materialsText: string;
   children: StepNode[];
 };
 type StepNode = Product & { rowKey: string; kind: "step" };
@@ -59,6 +60,7 @@ const treeData = computed<GroupNode[]>(() => {
     name: g.name,
     virtual: false,
     materialCount: g.materials.length,
+    materialsText: g.materials.map((m) => (m.unit ? `${m.name}(${m.unit})` : m.name)).join("、"),
     children: stepsByGroup.get(g.id) ?? [],
   }));
 
@@ -71,6 +73,7 @@ const treeData = computed<GroupNode[]>(() => {
       name: "未归集",
       virtual: true,
       materialCount: 0,
+      materialsText: "",
       children: unassigned,
     });
   }
@@ -314,13 +317,15 @@ onMounted(loadFactories);
           <span v-if="row.kind === 'step'">{{ row.processPrice != null ? row.processPrice.toFixed(4) : "-" }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="物料配方" width="120">
+      <el-table-column label="物料 / 配方" min-width="240">
         <template #default="{ row }">
-          <template v-if="row.kind === 'step'">
-            <el-tooltip v-if="row.materials.length" :content="materialsSummary(row)" placement="left">
-              <span class="material-count">{{ row.materials.length }} 种物料</span>
-            </el-tooltip>
-            <span v-else class="muted">未设置</span>
+          <template v-if="row.kind === 'group' && !row.virtual">
+            <span v-if="row.materialsText" class="recipe-text">{{ row.materialsText }}</span>
+            <span v-else class="muted">未录入物料</span>
+          </template>
+          <template v-else-if="row.kind === 'step'">
+            <span v-if="row.materials.length" class="recipe-text">{{ stepRecipeText(row) }}</span>
+            <span v-else class="muted">未设置配方</span>
           </template>
         </template>
       </el-table-column>
@@ -465,9 +470,12 @@ onMounted(loadFactories);
   margin-left: 8px;
 }
 
-.material-count {
-  color: #409eff;
-  cursor: help;
+.recipe-text {
+  font-size: 13px;
+  color: #606266;
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.5;
 }
 
 .muted {
