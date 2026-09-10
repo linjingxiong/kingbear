@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions } from "element-plus";
 import type {
   CommonMaterial,
@@ -52,6 +52,78 @@ const form = reactive({
   rows: [] as MatRow[],
 });
 const uploading = ref(false);
+
+/* ---------- 草稿：弹窗内容自动存到这台设备的浏览器，防止没录完刷新丢失 ---------- */
+const DRAFT_KEY = "kingbear-material-issuance-draft";
+const draftAvailable = ref(false);
+
+function formHasContent() {
+  return !!(
+    form.oemFactoryId ||
+    form.productGroupId ||
+    form.issuedDate ||
+    form.remark ||
+    form.imageUrl ||
+    form.rows.some((r) => r.materialRef || r.qty > 0 || r.ocrName)
+  );
+}
+
+function saveDraft() {
+  try {
+    if (dialogVisible.value && dialogMode.value === "create" && formHasContent()) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+    }
+  } catch {
+    // 存不进去（隐私模式等）就算了，不影响本次录入
+  }
+}
+function clearDraft() {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+  draftAvailable.value = false;
+}
+function checkDraft() {
+  try {
+    draftAvailable.value = !!localStorage.getItem(DRAFT_KEY);
+  } catch {
+    draftAvailable.value = false;
+  }
+}
+function restoreDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    dialogMode.value = "create";
+    editingId.value = null;
+    Object.assign(form, {
+      oemFactoryId: d.oemFactoryId ?? "",
+      productGroupId: d.productGroupId ?? "",
+      issuedDate: d.issuedDate ?? "",
+      remark: d.remark ?? "",
+      imageUrl: d.imageUrl ?? "",
+      rows: Array.isArray(d.rows) && d.rows.length ? d.rows : [{ materialRef: "", qty: 0, ocrName: "" }],
+    });
+    draftAvailable.value = false;
+    dialogVisible.value = true;
+  } catch {
+    ElMessage.error("草稿读取失败");
+  }
+}
+async function discardDraft() {
+  await ElMessageBox.confirm("确定丢弃这张没录完的发料草稿吗？", "确认", { type: "warning" });
+  clearDraft();
+}
+
+// 弹窗打开且在录入时，改动实时存草稿
+watch(form, saveDraft, { deep: true });
+// 弹窗关掉（取消/刷新）后，如果草稿还在，列表页顶部显示"恢复"入口
+watch(dialogVisible, (open) => {
+  if (!open) checkDraft();
+});
 
 const rules = {
   oemFactoryId: [{ required: true, message: "请选择代工厂", trigger: "change" }],
@@ -190,6 +262,7 @@ async function handleSubmit() {
     });
   }
   ElMessage.success("保存成功");
+  clearDraft();
   dialogVisible.value = false;
   load();
 }
@@ -206,6 +279,7 @@ async function handleDelete(row: MaterialIssuanceListItem) {
 }
 
 onMounted(async () => {
+  checkDraft();
   oemFactories.value = await listOemFactories();
   await Promise.all([loadProductGroups(), listCommonMaterials().then((v) => (commonMaterials.value = v))]);
   load();
@@ -223,6 +297,14 @@ onMounted(async () => {
         </el-button>
       </el-upload>
     </div>
+
+    <el-alert v-if="draftAvailable" type="warning" :closable="false" show-icon style="margin-bottom: 12px">
+      <template #title>
+        有一张没录完的发料草稿（上次意外关闭 / 刷新时自动存下的）
+        <el-button link type="primary" @click="restoreDraft">恢复</el-button>
+        <el-button link type="danger" @click="discardDraft">丢弃</el-button>
+      </template>
+    </el-alert>
 
     <el-table v-loading="loading" :data="list" border>
       <el-table-column prop="oemFactoryName" label="代工厂" width="130" />
