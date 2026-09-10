@@ -307,14 +307,14 @@ onMounted(async () => {
     </el-alert>
 
     <el-table v-loading="loading" :data="list" border size="small">
+      <el-table-column label="发放日期" width="120">
+        <template #default="{ row }">{{ (row.issuedDate ?? "").slice(0, 10) }}</template>
+      </el-table-column>
       <el-table-column prop="oemFactoryName" label="代工厂" width="130" />
       <el-table-column prop="productGroupName" label="产品 / 类型" width="130" />
       <el-table-column prop="materialName" label="物料" width="130" />
       <el-table-column label="数量" width="110" align="right">
         <template #default="{ row }">{{ row.qty.toLocaleString() }} {{ row.unit }}</template>
-      </el-table-column>
-      <el-table-column label="发放日期" width="120">
-        <template #default="{ row }">{{ (row.issuedDate ?? "").slice(0, 10) }}</template>
       </el-table-column>
       <el-table-column label="凭证" width="70" align="center">
         <template #default="{ row }">
