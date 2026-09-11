@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions } from "element-plus";
-import type { CreateOemReceiptDto, FactoryListItem, OemFactory, OemReceiptListItem, Product, ProductGroup } from "@kingbear/shared";
+import {
+  calculateQuantity,
+  hasBigQuantityDiff,
+  type CreateOemReceiptDto,
+  type FactoryListItem,
+  type OemFactory,
+  type OemReceiptListItem,
+  type Product,
+  type ProductGroup,
+} from "@kingbear/shared";
 import { listOemFactories } from "../../api/oem-factory";
 import { listFactories } from "../../api/factory";
 import { listProductGroupsByFactory } from "../../api/product-group";
@@ -50,8 +59,23 @@ async function load() {
   }
 }
 
-/* ---------- 弹窗（一张回收单 = 一个代工厂 + 一个产品 + 多行工序，可批量提交） ---------- */
-type RowItem = { productId: string; qty: number; ocrName: string };
+/* ---------- 弹窗（一张回收单 = 一个代工厂 + 一个产品 + 多行工序，可批量提交） ----------
+   数量跟入库单一样是"重量(斤) ÷ 单个克重(g)"换算出来的，qtyDeclared 是单据/识别到的数量
+   （可编辑，留空就用公式算），qtyFinal() 拿到的才是最终要保存的数量 */
+type RowItem = { productId: string; weightJin: number; unitWeightG: number; qtyDeclared: number | null; ocrName: string };
+
+function qtyCalculated(row: RowItem) {
+  return calculateQuantity(row.weightJin, row.unitWeightG);
+}
+function qtyFinal(row: RowItem) {
+  return row.qtyDeclared ?? qtyCalculated(row);
+}
+function hasDiff(row: RowItem) {
+  return row.qtyDeclared != null && row.qtyDeclared !== qtyCalculated(row);
+}
+function hasBigDiff(row: RowItem) {
+  return row.qtyDeclared != null && hasBigQuantityDiff(row.qtyDeclared, qtyCalculated(row));
+}
 const dialogVisible = ref(false);
 const dialogMode = ref<"create" | "edit">("create");
 const editingId = ref<string | null>(null);
@@ -83,7 +107,7 @@ function formHasContent() {
     form.receivedDate ||
     form.remark ||
     form.imageUrl ||
-    form.rows.some((r) => r.productId || r.qty > 0 || r.ocrName)
+    form.rows.some((r) => r.productId || r.weightJin > 0 || r.unitWeightG > 0 || r.qtyDeclared || r.ocrName)
   );
 }
 function saveDraft() {
@@ -123,7 +147,10 @@ function restoreDraft() {
       receivedDate: d.receivedDate ?? "",
       remark: d.remark ?? "",
       imageUrl: d.imageUrl ?? "",
-      rows: Array.isArray(d.rows) && d.rows.length ? d.rows : [{ productId: "", qty: 0, ocrName: "" }],
+      rows:
+        Array.isArray(d.rows) && d.rows.length
+          ? d.rows
+          : [{ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, ocrName: "" }],
     });
     draftAvailable.value = false;
     dialogVisible.value = true;
@@ -150,7 +177,7 @@ function resetForm() {
   Object.assign(form, { oemFactoryId: "", productGroupId: "", receivedDate: "", remark: "", imageUrl: "", rows: [] });
 }
 function addRow() {
-  form.rows.push({ productId: "", qty: 0, ocrName: "" });
+  form.rows.push({ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, ocrName: "" });
 }
 function removeRow(i: number) {
   form.rows.splice(i, 1);
@@ -173,7 +200,15 @@ function openEdit(row: OemReceiptListItem) {
     receivedDate: (row.receivedDate ?? "").slice(0, 10),
     remark: row.remark ?? "",
     imageUrl: row.images[0] ?? "",
-    rows: [{ productId: row.productId, qty: row.qty, ocrName: "" }],
+    rows: [
+      {
+        productId: row.productId,
+        weightJin: row.weightJin ?? 0,
+        unitWeightG: row.unitWeightG ?? 0,
+        qtyDeclared: row.qtyDeclared ?? row.qty,
+        ocrName: "",
+      },
+    ],
   });
   dialogVisible.value = true;
 }
@@ -226,9 +261,15 @@ async function onOcrUpload(options: UploadRequestOptions) {
     form.rows = r.items.length
       ? r.items.map((it) => {
           const matched = fuzzyMatchStep(it.skuOrName, stepOptions.value);
-          return { productId: matched?.id ?? "", qty: it.qty, ocrName: it.skuOrName };
+          return {
+            productId: matched?.id ?? "",
+            weightJin: it.weightJin,
+            unitWeightG: it.unitWeightG,
+            qtyDeclared: it.qtyDeclared,
+            ocrName: it.skuOrName,
+          };
         })
-      : [{ productId: "", qty: 0, ocrName: "" }];
+      : [{ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, ocrName: "" }];
 
     dialogVisible.value = true;
     ElMessage.success("识别完成，请核对后保存");
@@ -239,9 +280,9 @@ async function onOcrUpload(options: UploadRequestOptions) {
 
 async function handleSubmit() {
   await formRef.value?.validate();
-  const valid = form.rows.filter((r) => r.productId && r.qty > 0);
+  const valid = form.rows.filter((r) => r.productId && qtyFinal(r) > 0);
   if (!valid.length) {
-    ElMessage.warning("请至少填一行工序和数量");
+    ElMessage.warning("请至少填一行工序，并且重量/克重或数量至少填一样");
     return;
   }
 
@@ -250,7 +291,10 @@ async function handleSubmit() {
       const dto: CreateOemReceiptDto = {
         oemFactoryId: form.oemFactoryId,
         productId: row.productId,
-        qty: row.qty,
+        weightJin: row.weightJin,
+        unitWeightG: row.unitWeightG,
+        qtyDeclared: row.qtyDeclared,
+        qty: qtyFinal(row),
         receivedDate: form.receivedDate,
         remark: form.remark,
         images: form.imageUrl ? [form.imageUrl] : [],
@@ -262,7 +306,10 @@ async function handleSubmit() {
     await updateOemReceipt(editingId.value, {
       oemFactoryId: form.oemFactoryId,
       productId: row.productId,
-      qty: row.qty,
+      weightJin: row.weightJin,
+      unitWeightG: row.unitWeightG,
+      qtyDeclared: row.qtyDeclared,
+      qty: qtyFinal(row),
       receivedDate: form.receivedDate,
       remark: form.remark,
     });
@@ -317,8 +364,22 @@ onMounted(async () => {
       <el-table-column prop="oemFactoryName" label="代工厂" width="140" />
       <el-table-column prop="productSku" label="货号" width="100" />
       <el-table-column prop="productName" label="工序名称" show-overflow-tooltip />
-      <el-table-column label="数量" width="100" align="right">
-        <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
+      <el-table-column label="重量(斤)" width="90" align="right">
+        <template #default="{ row }">{{ row.weightJin || "-" }}</template>
+      </el-table-column>
+      <el-table-column label="克重(g)" width="90" align="right">
+        <template #default="{ row }">{{ row.unitWeightG || "-" }}</template>
+      </el-table-column>
+      <el-table-column label="数量" width="110" align="right">
+        <template #default="{ row }">
+          {{ row.qty.toLocaleString() }}
+          <el-tooltip
+            v-if="row.qtyDeclared != null && hasBigQuantityDiff(row.qtyDeclared, calculateQuantity(row.weightJin, row.unitWeightG))"
+            content="跟按重量算出来的数量相差超过5个，很可能录错了，建议核对"
+          >
+            <el-icon class="diff-icon"><WarningFilled /></el-icon>
+          </el-tooltip>
+        </template>
       </el-table-column>
       <el-table-column label="凭证" width="70" align="center">
         <template #default="{ row }">
@@ -342,7 +403,7 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增成品回收' : '编辑成品回收'" width="620px">
+    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增成品回收' : '编辑成品回收'" width="760px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item v-if="form.imageUrl" label="回收单">
           <div
@@ -376,11 +437,16 @@ onMounted(async () => {
                 filterable
                 :disabled="!form.productGroupId"
                 :placeholder="row.ocrName ? `识别为：${row.ocrName}` : '选择工序'"
-                style="width: 260px"
+                style="width: 220px"
               >
                 <el-option v-for="s in stepOptions" :key="s.id" :label="`${s.sku} · ${s.name}`" :value="s.id" />
               </el-select>
-              <el-input-number v-model="row.qty" :min="0" controls-position="right" style="width: 130px" />
+              <el-input-number v-model="row.weightJin" :min="0" :precision="3" placeholder="重量(斤)" controls-position="right" style="width: 110px" />
+              <el-input-number v-model="row.unitWeightG" :min="0" :precision="3" placeholder="克重(g)" controls-position="right" style="width: 110px" />
+              <el-input-number v-model="row.qtyDeclared" :min="0" placeholder="数量" controls-position="right" style="width: 110px" />
+              <el-tag v-if="hasDiff(row)" :type="hasBigDiff(row) ? 'danger' : 'warning'" size="small">
+                与算出来的（{{ qtyCalculated(row) }}）不一致
+              </el-tag>
               <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
@@ -447,12 +513,19 @@ onMounted(async () => {
 .muted {
   color: #c0c4cc;
 }
+.diff-icon {
+  color: #f56c6c;
+  margin-left: 2px;
+  vertical-align: middle;
+  cursor: help;
+}
 .rows-editor {
   width: 100%;
 }
 .mat-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
 }

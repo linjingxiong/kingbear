@@ -80,9 +80,10 @@ function buildDispatchSystemPrompt(): string {
 /** 每次调用都重新生成，年份用"现在" */
 function buildOemReceiptSystemPrompt(): string {
   const currentYear = new Date().getFullYear();
-  return `你是玩具加工厂的成品/半成品回收单据识别助手。用户会给你一张"回收单"（或叫领料单/交货单）的照片——
+  return `你是玩具加工厂的成品/半成品回收单据识别助手。用户会给你一张"回收单"（或叫领料单/还货单）的照片——
 代工厂把加工好的成品/半成品交回来时开的单据，上面一般包含：代工厂名称、产品名称（可选）、日期、
-若干行明细（货号或名称、数量）。
+若干行明细（货号或名称、重量(斤)、单个克重(g)、数量）——数量通常是靠重量除以单个克重换算出来的，
+不是称出来的整数，所以单据上重量、克重、数量这三个数往往都会写。
 
 只输出一个 JSON 对象，不要输出任何解释文字、不要用 markdown 代码块包裹，格式：
 
@@ -91,12 +92,17 @@ function buildOemReceiptSystemPrompt(): string {
   "productName": "产品名称，识别不到给 null",
   "date": "回收日期，格式 yyyy-MM-dd，识别不到给 null",
   "items": [
-    { "skuOrName": "货号或名称（能看到货号优先填货号，看不到就填名称）", "qty": 数量（纯数字，不带单位） }
+    {
+      "skuOrName": "货号或名称（能看到货号优先填货号，看不到就填名称）",
+      "weightJin": 重量数字（单位：斤，纯数字不带单位，没写就给 0）,
+      "unitWeightG": 单个克重数字（单位：克，纯数字不带单位，没写就给 0）,
+      "qtyDeclared": 单据上写的数量（纯数字），如果单据没有直接写数量就给 null
+    }
   ]
 }
 
 注意：
-- qty 必须是 JSON number，不带单位、不用字符串
+- 数字字段必须是 JSON number，不带单位、不用字符串
 - 单据上有多行明细，items 要包含所有行
 - 日期只写两位年份（如"26年8月2日"）一律理解成 20xx 年；完全没写年份就按 ${currentYear} 年，
   月、日照单据上的数字来，不要因为年份不确定就丢掉整个 date
@@ -283,7 +289,12 @@ function parseOemReceiptResult(content: string, logger: Logger): OemReceiptOcrRe
     const items: OemReceiptOcrItem[] = Array.isArray(parsed.items)
       ? parsed.items
           .filter((it): it is OemReceiptOcrItem => !!it && typeof it === 'object')
-          .map((it) => ({ skuOrName: toStr(it.skuOrName), qty: toNum(it.qty) }))
+          .map((it) => ({
+            skuOrName: toStr(it.skuOrName),
+            weightJin: toNum(it.weightJin),
+            unitWeightG: toNum(it.unitWeightG),
+            qtyDeclared: it.qtyDeclared == null ? null : toNum(it.qtyDeclared),
+          }))
           .filter((it) => it.skuOrName)
       : [];
     return {

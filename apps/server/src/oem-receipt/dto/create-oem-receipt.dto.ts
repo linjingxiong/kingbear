@@ -7,6 +7,20 @@ export class CreateOemReceiptDto {
   @IsMongoId()
   productId: string;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  weightJin?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  unitWeightG?: number;
+
+  @IsOptional()
+  @IsNumber()
+  qtyDeclared?: number | null;
+
   @IsNumber()
   @Min(0)
   qty: number;

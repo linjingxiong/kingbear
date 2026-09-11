@@ -47,7 +47,12 @@ export interface OemReceiptOcrResult {
 export interface OemReceiptOcrItem {
   /** 识别到的货号或名称，不一定跟系统里的工序精确对得上，调用方按名字/货号模糊匹配 */
   skuOrName: string;
-  qty: number;
+  /** 重量（斤） */
+  weightJin: number;
+  /** 单个克重（g） */
+  unitWeightG: number;
+  /** 单据上写的数量，没写就 null，由调用方按公式计算 */
+  qtyDeclared: number | null;
 }
 
 /** OCR Provider 统一接口：换供应商（Claude / GPT-4V / 通义千问VL...）只用改这一层的实现 */

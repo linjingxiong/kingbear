@@ -15,6 +15,9 @@ export interface OemReceiptListItem {
   id: string;
   oemFactoryId: string;
   productId: string;
+  weightJin: number;
+  unitWeightG: number;
+  qtyDeclared: number | null;
   qty: number;
   receivedDate: Date;
   images: string[];
