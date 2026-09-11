@@ -280,9 +280,10 @@ async function onOcrUpload(options: UploadRequestOptions) {
 
 async function handleSubmit() {
   await formRef.value?.validate();
-  const valid = form.rows.filter((r) => r.productId && qtyFinal(r) > 0);
+  // 重量必填，克重、数量都选填——数量没填就按公式算，克重不填算出来是0，等以后知道了再补
+  const valid = form.rows.filter((r) => r.productId && r.weightJin > 0);
   if (!valid.length) {
-    ElMessage.warning("请至少填一行工序，并且重量/克重或数量至少填一样");
+    ElMessage.warning("请至少填一行工序，并填写重量(斤)");
     return;
   }
 
@@ -431,6 +432,12 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="工序明细">
           <div class="rows-editor">
+            <div class="mat-row mat-row--header">
+              <span class="col-label" style="width: 220px">工序</span>
+              <span class="col-label col-label--required" style="width: 110px">重量(斤)</span>
+              <span class="col-label" style="width: 110px">克重(g)</span>
+              <span class="col-label" style="width: 110px">数量</span>
+            </div>
             <div v-for="(row, idx) in form.rows" :key="idx" class="mat-row">
               <el-select
                 v-model="row.productId"
@@ -528,5 +535,20 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.mat-row--header {
+  margin-bottom: 4px;
+}
+
+.col-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.col-label--required::before {
+  content: "*";
+  color: #f56c6c;
+  margin-right: 2px;
 }
 </style>
