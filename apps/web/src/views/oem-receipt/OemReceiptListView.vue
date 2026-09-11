@@ -357,7 +357,7 @@ onMounted(async () => {
       </template>
     </el-alert>
 
-    <el-table v-loading="loading" :data="list" border size="small">
+    <el-table v-loading="loading" :data="list" stripe size="small">
       <el-table-column label="回收日期" width="120">
         <template #default="{ row }">{{ (row.receivedDate ?? "").slice(0, 10) }}</template>
       </el-table-column>
