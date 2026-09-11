@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions }
 import {
   calculateQuantity,
   hasBigQuantityDiff,
+  type CommonMaterial,
   type CreateOemReceiptDto,
   type FactoryListItem,
   type OemFactory,
@@ -15,6 +16,8 @@ import { listOemFactories } from "../../api/oem-factory";
 import { listFactories } from "../../api/factory";
 import { listProductGroupsByFactory } from "../../api/product-group";
 import { listProductsByFactory } from "../../api/product";
+import { listCommonMaterials } from "../../api/common-material";
+import { createCommonMaterialReturn } from "../../api/common-material-return";
 import { createOemReceipt, deleteOemReceipt, listOemReceipts, recognizeOemReceipt, updateOemReceipt } from "../../api/oem-receipt";
 import { useImageZoomPan } from "../../composables/useImageZoomPan";
 
@@ -34,6 +37,7 @@ const oemFactories = ref<OemFactory[]>([]);
 // 产品/工序都是按玩具厂分的，回收时可以收任意玩具厂的产品，所以全量取一遍
 const productGroups = ref<(ProductGroup & { factoryName: string })[]>([]);
 const allSteps = ref<Product[]>([]);
+const commonMaterials = ref<CommonMaterial[]>([]);
 const list = ref<OemReceiptListItem[]>([]);
 const loading = ref(false);
 
@@ -76,6 +80,11 @@ function hasDiff(row: RowItem) {
 function hasBigDiff(row: RowItem) {
   return row.qtyDeclared != null && hasBigQuantityDiff(row.qtyDeclared, qtyCalculated(row));
 }
+
+// 代工厂交回成品时经常会连框（通用物料）一起还回来，这块单独一个列表，选填，
+// 提交时跟工序明细一起处理，不用再单独跑一趟"通用物料回收"页面
+type CommonRow = { commonMaterialName: string; qty: number };
+
 const dialogVisible = ref(false);
 const dialogMode = ref<"create" | "edit">("create");
 const editingId = ref<string | null>(null);
@@ -87,6 +96,7 @@ const form = reactive({
   remark: "",
   imageUrl: "",
   rows: [] as RowItem[],
+  commonRows: [] as CommonRow[],
 });
 const uploading = ref(false);
 
@@ -107,7 +117,8 @@ function formHasContent() {
     form.receivedDate ||
     form.remark ||
     form.imageUrl ||
-    form.rows.some((r) => r.productId || r.weightJin > 0 || r.unitWeightG > 0 || r.qtyDeclared || r.ocrName)
+    form.rows.some((r) => r.productId || r.weightJin > 0 || r.unitWeightG > 0 || r.qtyDeclared || r.ocrName) ||
+    form.commonRows.some((r) => r.commonMaterialName || r.qty > 0)
   );
 }
 function saveDraft() {
@@ -151,6 +162,7 @@ function restoreDraft() {
         Array.isArray(d.rows) && d.rows.length
           ? d.rows
           : [{ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, ocrName: "" }],
+      commonRows: Array.isArray(d.commonRows) ? d.commonRows : [],
     });
     draftAvailable.value = false;
     dialogVisible.value = true;
@@ -174,13 +186,27 @@ watch(dialogVisible, (open) => {
 });
 
 function resetForm() {
-  Object.assign(form, { oemFactoryId: "", productGroupId: "", receivedDate: "", remark: "", imageUrl: "", rows: [] });
+  Object.assign(form, {
+    oemFactoryId: "",
+    productGroupId: "",
+    receivedDate: "",
+    remark: "",
+    imageUrl: "",
+    rows: [],
+    commonRows: [],
+  });
 }
 function addRow() {
   form.rows.push({ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, ocrName: "" });
 }
 function removeRow(i: number) {
   form.rows.splice(i, 1);
+}
+function addCommonRow() {
+  form.commonRows.push({ commonMaterialName: "", qty: 0 });
+}
+function removeCommonRow(i: number) {
+  form.commonRows.splice(i, 1);
 }
 
 function openCreate() {
@@ -209,6 +235,7 @@ function openEdit(row: OemReceiptListItem) {
         ocrName: "",
       },
     ],
+    commonRows: [],
   });
   dialogVisible.value = true;
 }
@@ -315,6 +342,20 @@ async function handleSubmit() {
       remark: form.remark,
     });
   }
+
+  // 随货归还的通用物料（框等），创建模式才处理——编辑一条已有回收记录时不重复补建
+  if (dialogMode.value === "create") {
+    const validCommon = form.commonRows.filter((r) => r.commonMaterialName && r.qty > 0);
+    for (const row of validCommon) {
+      await createCommonMaterialReturn({
+        oemFactoryId: form.oemFactoryId,
+        commonMaterialName: row.commonMaterialName,
+        qty: row.qty,
+        returnedDate: form.receivedDate,
+      });
+    }
+  }
+
   ElMessage.success("保存成功");
   clearDraft();
   dialogVisible.value = false;
@@ -333,7 +374,7 @@ async function handleDelete(row: OemReceiptListItem) {
 onMounted(async () => {
   checkDraft();
   oemFactories.value = await listOemFactories();
-  await loadProductGroups();
+  await Promise.all([loadProductGroups(), listCommonMaterials().then((v) => (commonMaterials.value = v))]);
   load();
 });
 </script>
@@ -457,6 +498,19 @@ onMounted(async () => {
               <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item v-if="dialogMode === 'create'" label="通用物料">
+          <div class="rows-editor">
+            <div class="col-label" style="margin-bottom: 6px">随货归还的通用物料（比如框），选填，不影响成品保存</div>
+            <div v-for="(row, idx) in form.commonRows" :key="idx" class="mat-row">
+              <el-select v-model="row.commonMaterialName" filterable placeholder="选择通用物料" style="width: 220px">
+                <el-option v-for="m in commonMaterials" :key="m.id" :label="`${m.name}（${m.unit}）`" :value="m.name" />
+              </el-select>
+              <el-input-number v-model="row.qty" :min="0" placeholder="数量" controls-position="right" style="width: 130px" />
+              <el-button link type="danger" @click="removeCommonRow(idx)">删除</el-button>
+            </div>
+            <el-button @click="addCommonRow">+ 添加一行</el-button>
           </div>
         </el-form-item>
         <el-form-item label="备注">
