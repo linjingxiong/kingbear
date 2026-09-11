@@ -7,6 +7,19 @@ import { listFactories } from "../../api/factory";
 import { listProductGroupsByFactory } from "../../api/product-group";
 import { listProductsByFactory } from "../../api/product";
 import { createOemReceipt, deleteOemReceipt, listOemReceipts, recognizeOemReceipt, updateOemReceipt } from "../../api/oem-receipt";
+import { useImageZoomPan } from "../../composables/useImageZoomPan";
+
+// 回收单预览图：滚轮缩放 + 拖拽平移，跟入库确认页单据图片那套交互一样
+// （模板里 ref 只有作为顶层 setup 绑定才会自动解包，所以这里解构出来，不要整个对象一起传）
+const {
+  zoomLevel: slipZoomLevel,
+  isDragging: slipDragging,
+  style: slipStyle,
+  reset: resetSlipZoom,
+  onWheel: onSlipWheel,
+  onMouseDown: onSlipMouseDown,
+  onClick: onSlipClick,
+} = useImageZoomPan();
 
 const oemFactories = ref<OemFactory[]>([]);
 // 产品/工序都是按玩具厂分的，回收时可以收任意玩具厂的产品，所以全量取一遍
@@ -124,6 +137,11 @@ async function discardDraft() {
 }
 
 watch(form, saveDraft, { deep: true });
+// 图片换了（新建/识别/编辑/恢复草稿）就把缩放平移状态清掉，不然带着上一张图的缩放状态显示新图
+watch(
+  () => form.imageUrl,
+  () => resetSlipZoom(),
+);
 watch(dialogVisible, (open) => {
   if (!open) checkDraft();
 });
@@ -327,7 +345,15 @@ onMounted(async () => {
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增成品回收' : '编辑成品回收'" width="620px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item v-if="form.imageUrl" label="回收单">
-          <el-image :src="form.imageUrl" :preview-src-list="[form.imageUrl]" preview-teleported fit="contain" class="slip-preview" />
+          <div
+            class="slip-frame"
+            :class="{ 'slip-frame--zoomed': slipZoomLevel > 1, 'slip-frame--dragging': slipDragging }"
+            @click="onSlipClick"
+            @wheel.prevent="onSlipWheel"
+            @mousedown="onSlipMouseDown"
+          >
+            <img :src="form.imageUrl" class="slip-preview-img" :style="slipStyle" draggable="false" />
+          </div>
         </el-form-item>
         <el-form-item label="代工厂" prop="oemFactoryId">
           <el-select v-model="form.oemFactoryId" style="width: 100%">
@@ -385,11 +411,38 @@ onMounted(async () => {
   cursor: zoom-in;
   vertical-align: middle;
 }
-.slip-preview {
-  max-width: 100%;
-  max-height: 200px;
+/* 回收单预览：滚轮缩放 + 拖拽平移，跟入库确认页单据图片同一套交互，
+   固定尺寸的框 + overflow:hidden 裁掉超出部分，交互事件绑在框上（不是图片本身）——
+   图片实际渲染尺寸经常比框小，事件只挂图片上的话空白区域滚轮/拖拽会没反应 */
+.slip-frame {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  height: 220px;
   border: 1px solid #ebeef5;
   border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slip-frame--zoomed {
+  cursor: grab;
+}
+
+.slip-frame--dragging {
+  cursor: grabbing;
+}
+
+.slip-preview-img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  user-select: none;
+  pointer-events: none;
 }
 .muted {
   color: #c0c4cc;
