@@ -5,6 +5,7 @@ import { BillPaymentStatus, InboundStatus } from '@kingbear/shared';
 import { InboundRecord } from '../inbound/schemas/inbound-record.schema';
 import { Factory } from '../factory/schemas/factory.schema';
 import { Product } from '../product/schemas/product.schema';
+import { ProductGroup } from '../product-group/schemas/product-group.schema';
 import { MonthlyBillStatus } from '../billing/schemas/monthly-bill-status.schema';
 
 /** 从 InboundRecord.items 里拆出来、金额已经按实时产品价格重算过的一行 */
@@ -24,6 +25,7 @@ export class DashboardService {
     @InjectModel(InboundRecord.name) private readonly inboundModel: Model<InboundRecord>,
     @InjectModel(Factory.name) private readonly factoryModel: Model<Factory>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    @InjectModel(ProductGroup.name) private readonly productGroupModel: Model<ProductGroup>,
     @InjectModel(MonthlyBillStatus.name)
     private readonly billStatusModel: Model<MonthlyBillStatus>,
   ) {}
@@ -87,6 +89,89 @@ export class DashboardService {
       monthBySku: this.groupBySku(monthItems),
       allTimeBySku: this.groupBySku(allItems),
     };
+  }
+
+  /**
+   * "产品加工情况"面板：按产品（工序的父级）汇总指定时间段内的加工数量/金额，
+   * 展开能看到它下面每道工序自己的数字。dateFrom/dateTo 都不传就是不限时间（全部）。
+   * 跟首页其它统计同一套"实时价格"口径。
+   */
+  async getProductRangeSummary(dateFrom?: string, dateTo?: string) {
+    const filter: Record<string, unknown> = { status: InboundStatus.Completed };
+    if (dateFrom || dateTo) {
+      const range: Record<string, Date> = {};
+      if (dateFrom) range.$gte = new Date(dateFrom);
+      if (dateTo) {
+        const end = new Date(dateTo);
+        end.setDate(end.getDate() + 1); // dateTo 当天也要算进去，所以取到第二天凌晨为止（不含）
+        range.$lt = end;
+      }
+      filter.inboundDate = range;
+    }
+
+    const records = await this.inboundModel.find(filter);
+    const items = await this.withLivePrices(records);
+
+    const [products, groups, factories] = await Promise.all([
+      this.productModel.find().lean(),
+      this.productGroupModel.find().lean(),
+      this.factoryModel.find().lean(),
+    ]);
+    // sku 只在同一个玩具厂内唯一，查工序要用 factoryId+sku 一起做 key
+    const productMap = new Map(products.map((p) => [`${p.factoryId}|${p.sku}`, p]));
+    const groupMap = new Map(groups.map((g) => [String(g._id), g]));
+    const factoryNameMap = new Map(factories.map((f) => [String(f._id), f.name]));
+
+    type Bucket = {
+      productGroupId: string;
+      productGroupName: string;
+      factoryName: string;
+      qty: number;
+      amount: number;
+      steps: Map<string, { sku: string; name: string; qty: number; amount: number }>;
+    };
+    const buckets = new Map<string, Bucket>();
+
+    for (const item of items) {
+      const product = item.factoryId ? productMap.get(`${item.factoryId}|${item.sku}`) : undefined;
+      const groupId = product?.productGroupId ? String(product.productGroupId) : null;
+      const factoryName = item.factoryId ? (factoryNameMap.get(item.factoryId) ?? '未知玩具厂') : '未知玩具厂';
+      // 没归到产品的工序，按玩具厂分开放进各自的"未归集"里，不同厂的未归集工序不混在一起
+      const key = groupId ?? `unassigned:${item.factoryId ?? ''}`;
+
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = {
+          productGroupId: groupId ?? '',
+          productGroupName: groupId ? (groupMap.get(groupId)?.name ?? '未知产品') : '未归集',
+          factoryName,
+          qty: 0,
+          amount: 0,
+          steps: new Map(),
+        };
+        buckets.set(key, bucket);
+      }
+      bucket.qty += item.qtyFinal;
+      bucket.amount += item.amount;
+
+      const step = bucket.steps.get(item.sku) ?? { sku: item.sku, name: item.name, qty: 0, amount: 0 };
+      step.qty += item.qtyFinal;
+      step.amount += item.amount;
+      bucket.steps.set(item.sku, step);
+    }
+
+    const groupsResult = [...buckets.values()]
+      .map((b) => ({
+        productGroupId: b.productGroupId,
+        productGroupName: b.productGroupName,
+        factoryName: b.factoryName,
+        qty: b.qty,
+        amount: b.amount,
+        steps: [...b.steps.values()].sort((a, c) => c.amount - a.amount),
+      }))
+      .sort((a, c) => c.amount - a.amount);
+
+    return { groups: groupsResult };
   }
 
   private findCompleted(start: Date, end: Date) {

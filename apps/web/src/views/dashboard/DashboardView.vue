@@ -8,6 +8,7 @@ import { listProductsByFactory } from "../../api/product";
 // 直接把完整的应收账单页面嵌进首页，不用再跳转过去——首页往下滚就是它，
 // 玩具厂/账期选择、tab、明细这些原样保留，跟单独打开应收账单页是同一个组件
 import BillingView from "../billing/BillingView.vue";
+import ProductRangePanel from "./ProductRangePanel.vue";
 
 const overview = ref<DashboardOverview | null>(null);
 const loading = ref(false);
@@ -342,6 +343,14 @@ function weekdayLabel(date: string) {
             </el-table>
             <el-empty v-if="!overview.monthBySku.length" description="本月暂无数据" />
           </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 按产品看加工情况，时间范围自己选，默认不限时间——跟上面"本月/近7天"那些
+           固定周期的统计不一样，这块是让人自己挑一段时间灵活查 -->
+      <el-row :gutter="16" style="margin-top: 16px">
+        <el-col :span="24">
+          <ProductRangePanel />
         </el-col>
       </el-row>
     </template>

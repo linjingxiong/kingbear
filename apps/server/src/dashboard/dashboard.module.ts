@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { InboundRecord, InboundRecordSchema } from '../inbound/schemas/inbound-record.schema';
 import { Factory, FactorySchema } from '../factory/schemas/factory.schema';
 import { Product, ProductSchema } from '../product/schemas/product.schema';
+import { ProductGroup, ProductGroupSchema } from '../product-group/schemas/product-group.schema';
 import { MonthlyBillStatus, MonthlyBillStatusSchema } from '../billing/schemas/monthly-bill-status.schema';
 import { DashboardService } from './dashboard.service';
 import { DashboardController } from './dashboard.controller';
@@ -13,6 +14,7 @@ import { DashboardController } from './dashboard.controller';
       { name: InboundRecord.name, schema: InboundRecordSchema },
       { name: Factory.name, schema: FactorySchema },
       { name: Product.name, schema: ProductSchema },
+      { name: ProductGroup.name, schema: ProductGroupSchema },
       { name: MonthlyBillStatus.name, schema: MonthlyBillStatusSchema },
     ]),
   ],
