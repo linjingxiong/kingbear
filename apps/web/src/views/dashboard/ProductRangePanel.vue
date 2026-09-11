@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import dayjs from "dayjs";
 import type { ProductRangeGroupStat } from "@kingbear/shared";
 import { getProductRangeSummary } from "../../api/dashboard";
 
@@ -7,6 +8,32 @@ import { getProductRangeSummary } from "../../api/dashboard";
 const dateRange = ref<[string, string] | null>(null);
 const groups = ref<ProductRangeGroupStat[]>([]);
 const loading = ref(false);
+
+// 快捷按钮：省得每次都要点日期选择器现选，覆盖平时最常看的几个周期；"全部"就是清空日期
+type QuickPreset = "today" | "week" | "month" | "all";
+const activePreset = ref<QuickPreset | "custom">("all");
+
+function applyPreset(preset: QuickPreset) {
+  activePreset.value = preset;
+  const today = dayjs().format("YYYY-MM-DD");
+  if (preset === "today") {
+    dateRange.value = [today, today];
+  } else if (preset === "week") {
+    dateRange.value = [dayjs().subtract(6, "day").format("YYYY-MM-DD"), today];
+  } else if (preset === "month") {
+    dateRange.value = [dayjs().startOf("month").format("YYYY-MM-DD"), today];
+  } else {
+    dateRange.value = null;
+  }
+  load();
+}
+
+// 用户自己在日期选择器里挑日期（不是点快捷按钮）的话，快捷按钮就都不高亮，
+// 不然会出现"明明手动选了别的日期，某个快捷按钮却还亮着"这种误导
+function onDateRangeChange() {
+  activePreset.value = dateRange.value ? "custom" : "all";
+  load();
+}
 
 type RangeNode = {
   rowKey: string;
@@ -58,19 +85,27 @@ onMounted(load);
     <template #header>
       <div class="panel-header">
         <span>产品加工情况</span>
-        <el-date-picker
-          v-model="dateRange"
-          type="daterange"
-          value-format="YYYY-MM-DD"
-          range-separator="至"
-          start-placeholder="开始日期"
-          end-placeholder="结束日期"
-          clearable
-          placeholder="不选就是所有时间"
-          size="small"
-          style="width: 260px"
-          @change="load"
-        />
+        <div class="panel-controls">
+          <el-radio-group :model-value="activePreset" size="small" @change="applyPreset">
+            <el-radio-button value="today">今日</el-radio-button>
+            <el-radio-button value="week">近7天</el-radio-button>
+            <el-radio-button value="month">本月</el-radio-button>
+            <el-radio-button value="all">全部</el-radio-button>
+          </el-radio-group>
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            clearable
+            placeholder="或自己选日期范围"
+            size="small"
+            style="width: 240px"
+            @change="onDateRangeChange"
+          />
+        </div>
       </div>
     </template>
 
@@ -100,6 +135,13 @@ onMounted(load);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.panel-controls {
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
 }

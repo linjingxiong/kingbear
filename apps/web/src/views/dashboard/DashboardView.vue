@@ -114,18 +114,6 @@ function barWidth(qty: number) {
 // 不引入 dayjs 的中文 locale（怕影响其它页面已经在用的默认英文 locale），
 // 星期几直接手动映射
 const WEEKDAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
-// 表格底部合计行：直接用 week 汇总的总数量/总金额，跟上面 bySku 各行加起来是同一个数，
-// 不用在这里重新 reduce 一遍
-function weekSkuSummary({ columns }: { columns: { property: string }[] }) {
-  return columns.map((col, index) => {
-    if (index === 0) return "合计";
-    if (col.property === "qty") return overview.value?.week.processedQty.toLocaleString() ?? "";
-    if (col.property === "amount") {
-      return `¥${overview.value?.week.processedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? ""}`;
-    }
-    return "";
-  });
-}
 
 function weekdayLabel(date: string) {
   return `${dayjs(date).format("MM-DD")} 周${WEEKDAY_NAMES[dayjs(date).day()]}`;
@@ -266,22 +254,6 @@ function weekdayLabel(date: string) {
               </div>
             </div>
             <el-empty v-if="!overview.week.processedQty" description="近7天暂无加工数据" />
-
-            <!-- 近7天汇总总数不分品类没意义（跟"本月加工数量明细"同一个道理），
-                 这里按货号拆开列出各自的加工数量和金额 -->
-            <template v-if="overview.week.bySku.length">
-              <div class="week-sku-title">近7天按货号明细</div>
-              <el-table :data="overview.week.bySku" size="default" show-summary :summary-method="weekSkuSummary">
-                <el-table-column prop="sku" label="货号" width="140" />
-                <el-table-column prop="name" label="名称" show-overflow-tooltip />
-                <el-table-column prop="qty" label="近7天加工数量" align="right" width="160">
-                  <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
-                </el-table-column>
-                <el-table-column prop="amount" label="近7天加工金额" align="right" width="160">
-                  <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
-                </el-table-column>
-              </el-table>
-            </template>
           </el-card>
         </el-col>
       </el-row>
@@ -325,29 +297,8 @@ function weekdayLabel(date: string) {
         </el-col>
       </el-row>
 
-      <!-- "本月加工数量"上面那个笼统的总数不同货号加一起没意义，这里按货号拆开列出来，
-           才是真正能看的详情——跟应收账单里"按货号汇总不合并"是同一个原则 -->
-      <el-row :gutter="16" style="margin-top: 16px">
-        <el-col :span="24">
-          <el-card>
-            <template #header>本月加工数量明细（按货号）</template>
-            <el-table :data="overview.monthBySku" size="default">
-              <el-table-column prop="sku" label="货号" width="140" />
-              <el-table-column prop="name" label="名称" show-overflow-tooltip />
-              <el-table-column label="本月加工数量" align="right" width="160">
-                <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
-              </el-table-column>
-              <el-table-column label="本月加工金额" align="right" width="160">
-                <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
-              </el-table-column>
-            </el-table>
-            <el-empty v-if="!overview.monthBySku.length" description="本月暂无数据" />
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- 按产品看加工情况，时间范围自己选，默认不限时间——跟上面"本月/近7天"那些
-           固定周期的统计不一样，这块是让人自己挑一段时间灵活查 -->
+      <!-- 按产品/工序看加工数量明细，统一用下面这一块，时间范围自己挑（有今日/近7天/
+           本月/全部的快捷按钮）——不再跟"本月/近7天"卡片里各摆一份重复的按货号明细表 -->
       <el-row :gutter="16" style="margin-top: 16px">
         <el-col :span="24">
           <ProductRangePanel />
