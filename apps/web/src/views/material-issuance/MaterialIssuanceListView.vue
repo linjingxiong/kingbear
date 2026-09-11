@@ -179,6 +179,22 @@ function openEdit(row: MaterialIssuanceListItem) {
   dialogVisible.value = true;
 }
 
+// OCR 识别出来的物料名，跟录好的物料名做模糊匹配——同一张单据拍两次，识别文字都可能有
+// 细微出入（多写"主体"两个字、少个"珠"字之类），完全相等太严格，先精确匹配，
+// 不行就看谁包含谁（"主体后壳"包含"后壳"、"螺丝帽"是"螺丝帽珠"的一部分都算匹配上）
+function fuzzyMatchName(ocrName: string, candidates: { name: string }[]): string | null {
+  const name = ocrName.trim();
+  if (!name) return null;
+  const exact = candidates.find((c) => c.name === name);
+  if (exact) return exact.name;
+  // 短名字（1个字）互相包含太容易误判（"叶"会把"中叶""小叶""大叶"全匹配上），
+  // 只在两边名字都至少2个字时才按"谁包含谁"来判定
+  const partial = candidates.find(
+    (c) => c.name.length >= 2 && name.length >= 2 && (name.includes(c.name) || c.name.includes(name)),
+  );
+  return partial ? partial.name : null;
+}
+
 // 拍照识别：上传 → OCR → 预填代工厂/产品/日期/物料行（按名字匹配，匹配不到留空让人工选）
 async function onOcrUpload(options: UploadRequestOptions) {
   uploading.value = true;
@@ -199,18 +215,16 @@ async function onOcrUpload(options: UploadRequestOptions) {
     }
     if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.issuedDate = r.date;
 
-    const prodNames = new Set(productMaterialOptions.value.map((m) => m.name));
-    const commonNames = new Set(commonMaterials.value.map((m) => m.name));
     form.rows = r.items.length
-      ? r.items.map((it) => ({
-          materialRef: prodNames.has(it.materialName)
-            ? `p:${it.materialName}`
-            : commonNames.has(it.materialName)
-              ? `c:${it.materialName}`
-              : "",
-          qty: it.qty,
-          ocrName: it.materialName,
-        }))
+      ? r.items.map((it) => {
+          const prodMatch = fuzzyMatchName(it.materialName, productMaterialOptions.value);
+          const commonMatch = prodMatch ? null : fuzzyMatchName(it.materialName, commonMaterials.value);
+          return {
+            materialRef: prodMatch ? `p:${prodMatch}` : commonMatch ? `c:${commonMatch}` : "",
+            qty: it.qty,
+            ocrName: it.materialName,
+          };
+        })
       : [{ materialRef: "", qty: 0, ocrName: "" }];
 
     dialogVisible.value = true;
