@@ -8,6 +8,7 @@ export interface OemReceipt {
   receivedDate: string;
   /** 回收凭证图片，可以不止一张 */
   images: string[];
+  remark?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -25,6 +26,22 @@ export interface CreateOemReceiptDto {
   qty: number;
   receivedDate: string;
   images?: string[];
+  remark?: string;
 }
 
 export type UpdateOemReceiptDto = Partial<CreateOemReceiptDto>;
+
+/** 回收单 OCR 识别结果（POST /oem-receipts/recognize 返回，再带上 imageUrl） */
+export interface OemReceiptOcrResult {
+  imageUrl: string;
+  oemFactoryName: string | null;
+  productName: string | null;
+  date: string | null;
+  items: OemReceiptOcrItem[];
+}
+
+export interface OemReceiptOcrItem {
+  /** 识别到的货号或名称，不一定跟系统里的工序精确对得上，前端按名字/货号模糊匹配 */
+  skuOrName: string;
+  qty: number;
+}

@@ -8,6 +8,8 @@ import type {
   OcrProvider,
   OcrRawItem,
   OcrRawResult,
+  OemReceiptOcrItem,
+  OemReceiptOcrResult,
 } from '../ocr.types';
 
 // 阿里云 DashScope 的 OpenAI 兼容模式端点，通义千问 VL 系列模型都走这个
@@ -75,6 +77,32 @@ function buildDispatchSystemPrompt(): string {
 - 完全看不清或者不是发料单，各字段给 null，items 给空数组`;
 }
 
+/** 每次调用都重新生成，年份用"现在" */
+function buildOemReceiptSystemPrompt(): string {
+  const currentYear = new Date().getFullYear();
+  return `你是玩具加工厂的成品/半成品回收单据识别助手。用户会给你一张"回收单"（或叫领料单/交货单）的照片——
+代工厂把加工好的成品/半成品交回来时开的单据，上面一般包含：代工厂名称、产品名称（可选）、日期、
+若干行明细（货号或名称、数量）。
+
+只输出一个 JSON 对象，不要输出任何解释文字、不要用 markdown 代码块包裹，格式：
+
+{
+  "oemFactoryName": "代工厂名称，识别不到给 null",
+  "productName": "产品名称，识别不到给 null",
+  "date": "回收日期，格式 yyyy-MM-dd，识别不到给 null",
+  "items": [
+    { "skuOrName": "货号或名称（能看到货号优先填货号，看不到就填名称）", "qty": 数量（纯数字，不带单位） }
+  ]
+}
+
+注意：
+- qty 必须是 JSON number，不带单位、不用字符串
+- 单据上有多行明细，items 要包含所有行
+- 日期只写两位年份（如"26年8月2日"）一律理解成 20xx 年；完全没写年份就按 ${currentYear} 年，
+  月、日照单据上的数字来，不要因为年份不确定就丢掉整个 date
+- 完全看不清或者不是回收单，各字段给 null，items 给空数组`;
+}
+
 /** 通义千问 VL（阿里云 DashScope）的 OCR Provider 实现 */
 @Injectable()
 export class QwenVlOcrProvider implements OcrProvider {
@@ -96,6 +124,16 @@ export class QwenVlOcrProvider implements OcrProvider {
     );
     if (content == null) return emptyDispatchResult();
     return parseDispatchResult(content, this.logger);
+  }
+
+  async recognizeOemReceiptImage(imagePath: string): Promise<OemReceiptOcrResult> {
+    const content = await this.callQwenVl(
+      imagePath,
+      buildOemReceiptSystemPrompt(),
+      '请识别这张成品/半成品回收单图片，按要求的 JSON 格式输出。',
+    );
+    if (content == null) return emptyOemReceiptResult();
+    return parseOemReceiptResult(content, this.logger);
   }
 
   /** 调一次通义千问 VL，返回模型输出的文本；出错返回 null */
@@ -232,5 +270,30 @@ function parseDispatchResult(content: string, logger: Logger): MaterialDispatchO
   } catch (err) {
     logger.error(`通义千问 VL 发料单返回不是合法 JSON: ${(err as Error).message}\n原始返回: ${content}`);
     return emptyDispatchResult();
+  }
+}
+
+function emptyOemReceiptResult(): OemReceiptOcrResult {
+  return { oemFactoryName: null, productName: null, date: null, items: [] };
+}
+
+function parseOemReceiptResult(content: string, logger: Logger): OemReceiptOcrResult {
+  try {
+    const parsed = JSON.parse(extractJsonText(content)) as Partial<OemReceiptOcrResult>;
+    const items: OemReceiptOcrItem[] = Array.isArray(parsed.items)
+      ? parsed.items
+          .filter((it): it is OemReceiptOcrItem => !!it && typeof it === 'object')
+          .map((it) => ({ skuOrName: toStr(it.skuOrName), qty: toNum(it.qty) }))
+          .filter((it) => it.skuOrName)
+      : [];
+    return {
+      oemFactoryName: parsed.oemFactoryName ? toStr(parsed.oemFactoryName) : null,
+      productName: parsed.productName ? toStr(parsed.productName) : null,
+      date: parsed.date ? toStr(parsed.date) : null,
+      items,
+    };
+  } catch (err) {
+    logger.error(`通义千问 VL 回收单返回不是合法 JSON: ${(err as Error).message}\n原始返回: ${content}`);
+    return emptyOemReceiptResult();
   }
 }

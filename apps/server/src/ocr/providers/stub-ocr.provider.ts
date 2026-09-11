@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { MaterialDispatchOcrResult, OcrProvider, OcrRawResult } from '../ocr.types';
+import { MaterialDispatchOcrResult, OcrProvider, OcrRawResult, OemReceiptOcrResult } from '../ocr.types';
 
 /**
  * 占位实现：还没接入真实的多模态大模型 API 之前，让整个入库流程可以跑通联调。
@@ -20,6 +20,11 @@ export class StubOcrProvider implements OcrProvider {
   }
 
   async recognizeMaterialDispatchImage(imagePath: string): Promise<MaterialDispatchOcrResult> {
+    this.logger.warn(`OCR_PROVIDER 未配置真实供应商，${imagePath} 未做实际识别，返回空结果走人工录入`);
+    return { oemFactoryName: null, productName: null, date: null, items: [] };
+  }
+
+  async recognizeOemReceiptImage(imagePath: string): Promise<OemReceiptOcrResult> {
     this.logger.warn(`OCR_PROVIDER 未配置真实供应商，${imagePath} 未做实际识别，返回空结果走人工录入`);
     return { oemFactoryName: null, productName: null, date: null, items: [] };
   }

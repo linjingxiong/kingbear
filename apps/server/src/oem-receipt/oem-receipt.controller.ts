@@ -23,6 +23,15 @@ export class OemReceiptController {
     return { url: toPublicUploadUrl(this.uploadDir, file.path) };
   }
 
+  /** 上传回收单图片，OCR 识别，返回识别结果 + 图片 URL（不建记录，前端确认后再逐条 create） */
+  @Post('recognize')
+  @UseInterceptors(FileInterceptor('file', oemReceiptImageMulterOptions(process.env.UPLOAD_DIR ?? 'uploads')))
+  async recognize(@UploadedFile() file: Express.Multer.File) {
+    const imageUrl = toPublicUploadUrl(this.uploadDir, file.path);
+    const ocr = await this.receiptService.recognize(file.path);
+    return { imageUrl, ...ocr };
+  }
+
   @Post()
   create(@Body() dto: CreateOemReceiptDto) {
     return this.receiptService.create(dto);

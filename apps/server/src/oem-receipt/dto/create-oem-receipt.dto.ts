@@ -18,4 +18,8 @@ export class CreateOemReceiptDto {
   @IsArray()
   @IsString({ each: true })
   images?: string[];
+
+  @IsOptional()
+  @IsString()
+  remark?: string;
 }

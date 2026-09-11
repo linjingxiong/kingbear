@@ -17,6 +17,9 @@ export class OemReceipt extends Document {
 
   @Prop({ type: [String], default: [] })
   images: string[];
+
+  @Prop()
+  remark?: string;
 }
 
 export const OemReceiptSchema = SchemaFactory.createForClass(OemReceipt);

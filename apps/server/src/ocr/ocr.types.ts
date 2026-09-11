@@ -36,10 +36,26 @@ export interface MaterialDispatchOcrItem {
   qty: number;
 }
 
+/** 成品/半成品回收单识别结果：哪个代工厂交回的、哪个产品、日期、一列货号/名称和数量 */
+export interface OemReceiptOcrResult {
+  oemFactoryName: string | null;
+  productName: string | null;
+  date: string | null;
+  items: OemReceiptOcrItem[];
+}
+
+export interface OemReceiptOcrItem {
+  /** 识别到的货号或名称，不一定跟系统里的工序精确对得上，调用方按名字/货号模糊匹配 */
+  skuOrName: string;
+  qty: number;
+}
+
 /** OCR Provider 统一接口：换供应商（Claude / GPT-4V / 通义千问VL...）只用改这一层的实现 */
 export interface OcrProvider {
   /** imagePath 是图片在本地磁盘上的真实路径（不是对外的 /uploads URL） */
   recognizeInboundImage(imagePath: string): Promise<OcrRawResult>;
   /** 发料单识别 */
   recognizeMaterialDispatchImage(imagePath: string): Promise<MaterialDispatchOcrResult>;
+  /** 成品/半成品回收单识别 */
+  recognizeOemReceiptImage(imagePath: string): Promise<OemReceiptOcrResult>;
 }

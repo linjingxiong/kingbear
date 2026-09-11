@@ -1,4 +1,4 @@
-import type { CreateOemReceiptDto, OemReceiptListItem, UpdateOemReceiptDto } from "@kingbear/shared";
+import type { CreateOemReceiptDto, OemReceiptListItem, OemReceiptOcrResult, UpdateOemReceiptDto } from "@kingbear/shared";
 import request from "./request";
 
 export function listOemReceipts() {
@@ -10,6 +10,15 @@ export function uploadOemReceiptImage(file: File) {
   const form = new FormData();
   form.append("file", file);
   return request.post<never, { url: string }>("/oem-receipts/upload", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+}
+
+/** 上传回收单图片做 OCR 识别，返回识别结果 + 图片 URL（不建记录） */
+export function recognizeOemReceipt(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return request.post<never, OemReceiptOcrResult>("/oem-receipts/recognize", form, {
     headers: { "Content-Type": "multipart/form-data" },
   });
 }

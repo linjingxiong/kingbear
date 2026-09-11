@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { OemReceipt } from './schemas/oem-receipt.schema';
 import { OemFactory } from '../oem-factory/schemas/oem-factory.schema';
 import { Product } from '../product/schemas/product.schema';
+import { OCR_PROVIDER } from '../ocr/ocr.module';
+import type { OcrProvider } from '../ocr/ocr.types';
 import { CreateOemReceiptDto } from './dto/create-oem-receipt.dto';
 import { UpdateOemReceiptDto } from './dto/update-oem-receipt.dto';
 
@@ -16,6 +18,7 @@ export interface OemReceiptListItem {
   qty: number;
   receivedDate: Date;
   images: string[];
+  remark?: string;
   createdAt?: Date;
   updatedAt?: Date;
   oemFactoryName: string;
@@ -29,10 +32,16 @@ export class OemReceiptService {
     @InjectModel(OemReceipt.name) private readonly receiptModel: Model<OemReceipt>,
     @InjectModel(OemFactory.name) private readonly oemFactoryModel: Model<OemFactory>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    @Inject(OCR_PROVIDER) private readonly ocr: OcrProvider,
   ) {}
 
   create(dto: CreateOemReceiptDto) {
     return this.receiptModel.create(dto);
+  }
+
+  /** 回收单图片 OCR 识别，只返回识别结果，不建记录 */
+  recognize(imagePath: string) {
+    return this.ocr.recognizeOemReceiptImage(imagePath);
   }
 
   /** 列表带上代工厂/产品名称——前端列表页、物料对账都要用到人能看懂的名字，不是裸 id */
