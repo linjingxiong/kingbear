@@ -451,25 +451,6 @@ const donut = computed(() => {
 </template>
 
 <style scoped>
-/* 统一这一页所有卡片（包括嵌进来的 ProductRangePanel / BillingView 内部的卡片）的
-   圆角/阴影/内边距，看起来是同一套设计，不是东拼西凑 */
-.dashboard :deep(.el-card) {
-  border: none;
-  border-radius: 12px;
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.06),
-    0 1px 2px rgba(0, 0, 0, 0.04);
-}
-
-.dashboard :deep(.el-card__header) {
-  border-bottom: 1px solid #f2f3f5;
-  padding: 14px 20px;
-}
-
-.dashboard :deep(.el-card__body) {
-  padding: 20px;
-}
-
 .dashboard {
   display: flex;
   flex-direction: column;

@@ -33,3 +33,36 @@ body {
 .el-table th.el-table__cell > .cell {
   text-align: center;
 }
+
+/* 全局卡片样式：圆角+柔和阴影、去掉默认边框，参考 soybean-admin 那种干净的后台观感。
+   放在全局而不是各个页面自己重复写一遍 :deep(.el-card)——这样新加的页面天生就是这套风格，
+   不用每次都记得加。 */
+.el-card {
+  border: none;
+  border-radius: 12px;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.el-card__header {
+  padding: 14px 20px;
+  border-bottom: 1px solid #f2f3f5;
+  font-weight: 600;
+}
+
+.el-card__body {
+  padding: 20px;
+}
+
+/* 按钮/输入框/下拉框的圆角跟卡片呼应一下，不要一个圆一个方；.is-circle/.is-round 之类
+   更具体的选择器优先级更高，本来就不受这条影响，图标按钮该圆还是圆 */
+.el-button {
+  border-radius: 8px;
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  border-radius: 8px;
+}
