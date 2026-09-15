@@ -1,12 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { InboundStatus } from '@kingbear/shared';
+import { ContactablePartyCrudService } from '../common/services/contactable-party-crud.service';
 import { Factory } from './schemas/factory.schema';
 import { Product } from '../product/schemas/product.schema';
 import { InboundRecord } from '../inbound/schemas/inbound-record.schema';
-import { CreateFactoryDto } from './dto/create-factory.dto';
-import { UpdateFactoryDto } from './dto/update-factory.dto';
 
 // findAll() 用 .lean() 拼接聚合结果，交给 TS 自动推断会因为引用到 mongodb 内部类型而报
 // "inferred type cannot be named" / 超出可序列化长度，这里手动给个显式类型
@@ -23,21 +22,24 @@ export interface FactoryWithStats {
   processedAmount: number;
 }
 
+// create/findOne/update/remove 这几个基础 CRUD 交给 ContactablePartyCrudService
+// （代工厂 OemFactoryService 也是继承同一个基类），这里只保留 Factory 自己独有的：
+// 带统计信息的 findAll、OCR 玩具厂名模糊匹配、exists 判断
 @Injectable()
-export class FactoryService {
+export class FactoryService extends ContactablePartyCrudService<Factory> {
+  protected readonly notFoundMessage = '玩具厂不存在';
+
   constructor(
-    @InjectModel(Factory.name) private readonly factoryModel: Model<Factory>,
+    @InjectModel(Factory.name) factoryModel: Model<Factory>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
     @InjectModel(InboundRecord.name) private readonly inboundModel: Model<InboundRecord>,
-  ) {}
-
-  create(dto: CreateFactoryDto) {
-    return this.factoryModel.create(dto);
+  ) {
+    super(factoryModel);
   }
 
   /** 列表：附带产品数量、累计加工金额（供概览用，非分页大表） */
   async findAll(): Promise<FactoryWithStats[]> {
-    const factories = await this.factoryModel.find().sort({ createdAt: -1 }).lean();
+    const factories = await this.model.find().sort({ createdAt: -1 }).lean();
 
     const [productCounts, amountMap] = await Promise.all([
       this.productModel.aggregate([
@@ -89,31 +91,13 @@ export class FactoryService {
     return amountMap;
   }
 
-  async findOne(id: string) {
-    const factory = await this.factoryModel.findById(id);
-    if (!factory) throw new NotFoundException('玩具厂不存在');
-    return factory;
-  }
-
-  async update(id: string, dto: UpdateFactoryDto) {
-    const factory = await this.factoryModel.findByIdAndUpdate(id, dto, { new: true });
-    if (!factory) throw new NotFoundException('玩具厂不存在');
-    return factory;
-  }
-
-  async remove(id: string) {
-    const factory = await this.factoryModel.findByIdAndDelete(id);
-    if (!factory) throw new NotFoundException('玩具厂不存在');
-    return { success: true };
-  }
-
   /** 供 inbound 模块做模糊匹配（OCR 识别到的玩具厂名称 → 已有玩具厂） */
   async findByFuzzyName(name: string) {
-    return this.factoryModel.findOne({ name: new RegExp(escapeRegExp(name), 'i') });
+    return this.model.findOne({ name: new RegExp(escapeRegExp(name), 'i') });
   }
 
   async exists(id: string) {
-    return this.factoryModel.exists({ _id: new Types.ObjectId(id) });
+    return this.model.exists({ _id: new Types.ObjectId(id) });
   }
 }
 

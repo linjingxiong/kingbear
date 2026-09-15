@@ -28,8 +28,9 @@ const menuItems = [
     title: "业务管理",
     icon: "Van",
     children: [
+      // 入库、入库退货操作流程很像，合并成一个页面用 tab 切换（见 InboundHubView），
+      // 这里只留一个菜单入口，标题还叫"入库管理"，进去之后自己选 tab
       { path: "/inbound", title: "入库管理", icon: "Van" },
-      { path: "/inbound-return", title: "入库退货", icon: "RefreshLeft" },
       { path: "/asset", title: "资产盘点", icon: "Suitcase" },
     ],
   },
@@ -40,10 +41,9 @@ const menuItems = [
     children: [
       { path: "/oem-factory", title: "代工厂管理", icon: "OfficeBuilding" },
       { path: "/common-material", title: "通用物料", icon: "Goods" },
-      { path: "/material-issuance", title: "物料发放", icon: "Promotion" },
-      { path: "/oem-receipt", title: "成品回收", icon: "RefreshLeft" },
-      { path: "/common-material-return", title: "通用物料回收", icon: "RefreshLeft" },
-      { path: "/oem-reconciliation", title: "物料对账", icon: "DataAnalysis" },
+      // 物料发放/成品回收/通用物料回收/物料对账，都是围绕"代工厂物料收发"这一件事，
+      // 合并成一个页面用 tab 切换（见 MaterialFlowHubView），原来4个菜单项合成这1个
+      { path: "/material-flow", title: "物料流转", icon: "Promotion" },
     ],
   },
 ];

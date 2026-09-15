@@ -34,7 +34,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "inbound",
         name: "inbound",
-        component: () => import("../views/inbound/InboundListView.vue"),
+        component: () => import("../views/inbound/InboundHubView.vue"),
         meta: { title: "入库管理" },
       },
       {
@@ -42,12 +42,6 @@ const routes: RouteRecordRaw[] = [
         name: "inbound-confirm",
         component: () => import("../views/inbound/InboundConfirmView.vue"),
         meta: { title: "入库确认" },
-      },
-      {
-        path: "inbound-return",
-        name: "inbound-return",
-        component: () => import("../views/inbound-return/InboundReturnListView.vue"),
-        meta: { title: "入库退货" },
       },
       {
         path: "billing",
@@ -74,28 +68,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "通用物料" },
       },
       {
-        path: "common-material-return",
-        name: "common-material-return",
-        component: () => import("../views/common-material-return/CommonMaterialReturnListView.vue"),
-        meta: { title: "通用物料回收" },
-      },
-      {
-        path: "material-issuance",
-        name: "material-issuance",
-        component: () => import("../views/material-issuance/MaterialIssuanceListView.vue"),
-        meta: { title: "物料发放" },
-      },
-      {
-        path: "oem-receipt",
-        name: "oem-receipt",
-        component: () => import("../views/oem-receipt/OemReceiptListView.vue"),
-        meta: { title: "成品回收" },
-      },
-      {
-        path: "oem-reconciliation",
-        name: "oem-reconciliation",
-        component: () => import("../views/oem-reconciliation/OemReconciliationView.vue"),
-        meta: { title: "物料对账" },
+        path: "material-flow",
+        name: "material-flow",
+        component: () => import("../views/material-flow/MaterialFlowHubView.vue"),
+        meta: { title: "物料流转" },
       },
     ],
   },
