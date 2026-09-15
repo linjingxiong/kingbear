@@ -426,16 +426,16 @@ onMounted(async () => {
           <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
         <el-form-item label="货号明细">
-          <!-- 每一行固定用 grid 分栏，跟表头严格对齐；跟原来 flex-wrap 的写法不一样——
-               宽度不够时是横向滚动，不会整行乱换行错位。数量差异提示原来是一整句文字的
-               el-tag，OCR 批量识别时好几行都有差异、挤在一起太宽，反而是造成换行的主因，
-               这里改成跟列表页一样的小图标+悬浮提示 -->
+          <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会
+               乱换行错位。重量(斤)/克重(g) 换算出来的"算出数量"直接摆一列常显——跟数量
+               对不上就是红色，不用悬浮/点击才能看到，一眼就能核对是不是录错了 -->
           <div class="rows-editor">
             <div class="rows-grid rows-grid--header">
               <span class="col-label">货号</span>
               <span class="col-label col-label--required">重量(斤)</span>
               <span class="col-label">克重(g)</span>
               <span class="col-label">数量</span>
+              <span class="col-label">算出数量</span>
               <span class="col-label">退货原因</span>
               <span class="col-label">操作</span>
             </div>
@@ -452,13 +452,13 @@ onMounted(async () => {
               <el-input-number v-model="row.weightJin" :min="0" :precision="3" controls-position="right" style="width: 100%" />
               <el-input-number v-model="row.unitWeightG" :min="0" :precision="3" controls-position="right" style="width: 100%" />
               <el-input-number v-model="row.qtyDeclared" :min="0" controls-position="right" style="width: 100%" />
+              <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，跟"数量"这一列不是一回事——
+                   不一致就标红，方便对照原始单据核对到底是哪个数抄错了 -->
+              <span class="calc-qty" :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }">
+                {{ qtyCalculated(row) }}
+              </span>
               <el-input v-model="row.reason" placeholder="比如：破损/色差" />
-              <div class="row-actions">
-                <el-tooltip v-if="hasDiff(row)" :content="`与按重量算出来的（${qtyCalculated(row)}）不一致，${hasBigDiff(row) ? '相差较大，' : ''}建议核对`">
-                  <el-icon class="diff-icon" :class="{ 'diff-icon--big': hasBigDiff(row) }"><WarningFilled /></el-icon>
-                </el-tooltip>
-                <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
-              </div>
+              <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
@@ -541,21 +541,30 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  grid-template-columns: 200px 100px 100px 100px 130px 90px;
+  grid-template-columns: 190px 95px 95px 95px 90px 120px 60px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  min-width: 720px;
+  min-width: 790px;
 }
 
 .rows-grid--header {
   margin-bottom: 4px;
 }
 
-.row-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.calc-qty {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #909399;
+}
+
+.calc-qty--diff {
+  color: #e6a23c;
+}
+
+.calc-qty--big-diff {
+  color: #f56c6c;
+  font-weight: 700;
 }
 
 .col-label {
