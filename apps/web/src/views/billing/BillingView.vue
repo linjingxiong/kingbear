@@ -72,7 +72,7 @@ function isDuplicateRow(row: BillingDetailRow) {
 }
 
 // 小图标不够显眼，有问题的这一整行都高亮，一眼就能扫到；具体是哪种问题看各自列上的小图标提示。
-// 退货行不是"问题"，用另一种颜色区分开就行，不跟异常行混在一起标红
+// 退货行也标红，但用比"数量异常"浅一点的红区分开——不是同一种"问题"，只是提醒这行是负数
 function rowClassName({ row }: { row: BillingDetailRow }) {
   if (isBigQtyDiff(row) || isZeroAmount(row) || isDuplicateRow(row)) return "qty-diff-row";
   if (row.isReturn) return "return-row";
@@ -126,6 +126,9 @@ function exportExcel() {
   const summaryRows = [
     ["货号", "名称", "出货数量", "金额"],
     ...s.bySku.map((row) => [row.sku, row.name, row.qty, row.amount]),
+    // 按货号汇总/应收合计已经是扣完退货的净数，这两行只是让"这个月退了多少"在导出的
+    // Excel 里也能一眼看到，不是要另外加减
+    ...(s.returnAmount > 0 ? [["其中：本期退货", "", -s.returnQty, -s.returnAmount]] : []),
     ["应收合计", "", s.totalQty, s.totalAmount],
   ];
 
@@ -135,10 +138,10 @@ function exportExcel() {
   const usedNames = new Set<string>(["汇总"]);
   for (const sku of s.bySku) {
     const detailRows = [
-      ["时间", "名称", "重量/斤", "克重/g", "出货数量", "金额"],
+      ["时间", "名称", "重量/斤", "克重/g", "出货数量", "金额", "类型"],
       ...s.details
         .filter((row) => row.sku === sku.sku)
-        .map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount]),
+        .map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.isReturn ? "退货" : ""]),
     ];
     let sheetName = toSheetName(`${sku.sku}${sku.name}`);
     // 货号+名称截断后偶尔会撞名，撞了就退化成只用货号，货号本身在 bySku 里是唯一的
@@ -526,10 +529,11 @@ onMounted(async () => {
   background-color: #fef0f0;
 }
 
-/* 退货行：淡淡的暖灰底色区分开，不是"问题"不用标红，跟正常入库行放一起看着别扭就够了 */
+/* 退货行：数量/金额都是负数，整行标红——用比"数量异常"（#fef0f0）浅一点的红，
+   两种情况看着还是能区分开，不会误以为退货也是录入出错 */
 :deep(.return-row td) {
-  background-color: #fafafa;
-  color: #909399;
+  background-color: #fff1f0;
+  color: #f56c6c;
 }
 
 .return-total-row td {
