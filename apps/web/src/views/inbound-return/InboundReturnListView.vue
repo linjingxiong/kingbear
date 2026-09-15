@@ -404,7 +404,7 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增退货' : '编辑退货'" width="760px">
+    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增退货' : '编辑退货'" width="min(880px, 95vw)">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item v-if="form.imageUrl" label="退货单">
           <div
@@ -426,32 +426,39 @@ onMounted(async () => {
           <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
         <el-form-item label="货号明细">
+          <!-- 每一行固定用 grid 分栏，跟表头严格对齐；跟原来 flex-wrap 的写法不一样——
+               宽度不够时是横向滚动，不会整行乱换行错位。数量差异提示原来是一整句文字的
+               el-tag，OCR 批量识别时好几行都有差异、挤在一起太宽，反而是造成换行的主因，
+               这里改成跟列表页一样的小图标+悬浮提示 -->
           <div class="rows-editor">
-            <div class="mat-row mat-row--header">
-              <span class="col-label" style="width: 200px">货号</span>
-              <span class="col-label col-label--required" style="width: 100px">重量(斤)</span>
-              <span class="col-label" style="width: 100px">克重(g)</span>
-              <span class="col-label" style="width: 100px">数量</span>
-              <span class="col-label" style="width: 130px">退货原因</span>
+            <div class="rows-grid rows-grid--header">
+              <span class="col-label">货号</span>
+              <span class="col-label col-label--required">重量(斤)</span>
+              <span class="col-label">克重(g)</span>
+              <span class="col-label">数量</span>
+              <span class="col-label">退货原因</span>
+              <span class="col-label">操作</span>
             </div>
-            <div v-for="(row, idx) in form.rows" :key="idx" class="mat-row">
+            <div v-for="(row, idx) in form.rows" :key="idx" class="rows-grid">
               <el-select
                 v-model="row.productId"
                 filterable
                 :disabled="!form.factoryId"
                 :placeholder="row.ocrName ? `识别为：${row.ocrName}` : '选择货号'"
-                style="width: 200px"
+                style="width: 100%"
               >
                 <el-option v-for="p in productsByFactory" :key="p.id" :label="`${p.sku} · ${p.name}`" :value="p.id" />
               </el-select>
-              <el-input-number v-model="row.weightJin" :min="0" :precision="3" placeholder="重量(斤)" controls-position="right" style="width: 100px" />
-              <el-input-number v-model="row.unitWeightG" :min="0" :precision="3" placeholder="克重(g)" controls-position="right" style="width: 100px" />
-              <el-input-number v-model="row.qtyDeclared" :min="0" placeholder="数量" controls-position="right" style="width: 100px" />
-              <el-input v-model="row.reason" placeholder="比如：破损/色差" style="width: 130px" />
-              <el-tag v-if="hasDiff(row)" :type="hasBigDiff(row) ? 'danger' : 'warning'" size="small">
-                与算出来的（{{ qtyCalculated(row) }}）不一致
-              </el-tag>
-              <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
+              <el-input-number v-model="row.weightJin" :min="0" :precision="3" controls-position="right" style="width: 100%" />
+              <el-input-number v-model="row.unitWeightG" :min="0" :precision="3" controls-position="right" style="width: 100%" />
+              <el-input-number v-model="row.qtyDeclared" :min="0" controls-position="right" style="width: 100%" />
+              <el-input v-model="row.reason" placeholder="比如：破损/色差" />
+              <div class="row-actions">
+                <el-tooltip v-if="hasDiff(row)" :content="`与按重量算出来的（${qtyCalculated(row)}）不一致，${hasBigDiff(row) ? '相差较大，' : ''}建议核对`">
+                  <el-icon class="diff-icon" :class="{ 'diff-icon--big': hasBigDiff(row) }"><WarningFilled /></el-icon>
+                </el-tooltip>
+                <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
+              </div>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
@@ -519,23 +526,36 @@ onMounted(async () => {
 }
 .diff-icon {
   color: #f56c6c;
-  margin-left: 2px;
   vertical-align: middle;
   cursor: help;
 }
+.diff-icon--big {
+  color: #f56c6c;
+  font-weight: 700;
+}
 .rows-editor {
   width: 100%;
+  /* 货号+3个数字框+原因+操作，几列加起来比对话框窄的时候（比如手机端）就横向滚动，
+     不要让每一行自己去做换行——换行会导致输入框跟表头错位，比滚动条更难用 */
+  overflow-x: auto;
 }
-.mat-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+.rows-grid {
+  display: grid;
+  grid-template-columns: 200px 100px 100px 100px 130px 90px;
   gap: 8px;
+  align-items: center;
   margin-bottom: 8px;
+  min-width: 720px;
 }
 
-.mat-row--header {
+.rows-grid--header {
   margin-bottom: 4px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .col-label {
