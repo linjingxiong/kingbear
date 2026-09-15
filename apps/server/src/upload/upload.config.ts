@@ -39,6 +39,11 @@ export function inboundImageMulterOptions(uploadDir: string) {
   return imageMulterOptions(uploadDir, 'inbound');
 }
 
+/** 入库退货凭证图片 */
+export function inboundReturnImageMulterOptions(uploadDir: string) {
+  return imageMulterOptions(uploadDir, 'inbound-returns');
+}
+
 /** 资产领用凭证图片（收据、签字单等） */
 export function assetImageMulterOptions(uploadDir: string) {
   return imageMulterOptions(uploadDir, 'assets');

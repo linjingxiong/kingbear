@@ -29,6 +29,7 @@ const menuItems = [
     icon: "Van",
     children: [
       { path: "/inbound", title: "入库管理", icon: "Van" },
+      { path: "/inbound-return", title: "入库退货", icon: "RefreshLeft" },
       { path: "/asset", title: "资产盘点", icon: "Suitcase" },
     ],
   },

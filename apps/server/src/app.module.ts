@@ -10,6 +10,7 @@ import { FactoryModule } from './factory/factory.module';
 import { ProductModule } from './product/product.module';
 import { ProductGroupModule } from './product-group/product-group.module';
 import { InboundModule } from './inbound/inbound.module';
+import { InboundReturnModule } from './inbound-return/inbound-return.module';
 import { OcrModule } from './ocr/ocr.module';
 import { BillingModule } from './billing/billing.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -41,6 +42,7 @@ import { OemReconciliationModule } from './oem-reconciliation/oem-reconciliation
     ProductGroupModule,
     OcrModule,
     InboundModule,
+    InboundReturnModule,
     BillingModule,
     DashboardModule,
     AssetModule,

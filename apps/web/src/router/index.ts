@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "入库确认" },
       },
       {
+        path: "inbound-return",
+        name: "inbound-return",
+        component: () => import("../views/inbound-return/InboundReturnListView.vue"),
+        meta: { title: "入库退货" },
+      },
+      {
         path: "billing",
         name: "billing",
         component: () => import("../views/billing/BillingView.vue"),

@@ -43,8 +43,10 @@ async function loadFactories() {
 }
 
 // 跟入库确认页、入库管理列表用同一份"相差超过 5 个算异常"的标准，账单上金额算得再准，
-// 源头数量本身就录错的话也要能看出来
+// 源头数量本身就录错的话也要能看出来。退货行的 qty 是负数，套用这套"申报数 vs 称重算出来的"
+// 比较没有意义（一定会被判成"相差很大"），退货单自己录入时已经有过一遍这个检查了，这里跳过
 function isBigQtyDiff(row: BillingDetailRow) {
+  if (row.isReturn) return false;
   return hasBigQuantityDiff(row.qty, calculateQuantity(row.weightJin, row.unitWeightG));
 }
 
@@ -69,9 +71,12 @@ function isDuplicateRow(row: BillingDetailRow) {
   return (duplicateRowCounts.value.get(`${row.date}|${row.sku}|${row.qty}`) ?? 0) > 1;
 }
 
-// 小图标不够显眼，有问题的这一整行都高亮，一眼就能扫到；具体是哪种问题看各自列上的小图标提示
+// 小图标不够显眼，有问题的这一整行都高亮，一眼就能扫到；具体是哪种问题看各自列上的小图标提示。
+// 退货行不是"问题"，用另一种颜色区分开就行，不跟异常行混在一起标红
 function rowClassName({ row }: { row: BillingDetailRow }) {
-  return isBigQtyDiff(row) || isZeroAmount(row) || isDuplicateRow(row) ? "qty-diff-row" : "";
+  if (isBigQtyDiff(row) || isZeroAmount(row) || isDuplicateRow(row)) return "qty-diff-row";
+  if (row.isReturn) return "return-row";
+  return "";
 }
 
 async function handleQuery() {
@@ -216,6 +221,13 @@ onMounted(async () => {
                   </tr>
                 </tbody>
                 <tfoot>
+                  <!-- 下面"应收合计"已经是扣完退货之后的净数——这一行只是让"退了多少"一眼看得到，
+                       不是另外要加/减的数字 -->
+                  <tr v-if="summary.returnAmount > 0" class="return-total-row">
+                    <td colspan="2">其中：本期退货</td>
+                    <td class="num">-{{ summary.returnQty.toLocaleString() }}</td>
+                    <td class="num">-¥{{ summary.returnAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</td>
+                  </tr>
                   <tr class="grand-total">
                     <td colspan="2">应收合计</td>
                     <td class="num">{{ summary.totalQty.toLocaleString() }}</td>
@@ -238,6 +250,9 @@ onMounted(async () => {
                   <el-table-column label="货号" width="90">
                     <template #default="{ row }">
                       {{ row.sku }}
+                      <el-tooltip v-if="row.isReturn" :content="row.reason ? `退货原因：${row.reason}` : '退货'">
+                        <el-tag type="danger" size="small" effect="plain">退</el-tag>
+                      </el-tooltip>
                       <el-tooltip v-if="isDuplicateRow(row)" content="同一天、同货号、同数量的记录不止一条，疑似重复录入，请核对">
                         <el-icon class="qty-diff-icon"><WarningFilled /></el-icon>
                       </el-tooltip>
@@ -276,6 +291,7 @@ onMounted(async () => {
                   <el-table-column label="附件" width="70" align="center">
                     <template #default="{ row }">
                       <el-image
+                        v-if="row.imageUrl"
                         :src="row.imageUrl"
                         :preview-src-list="[row.imageUrl]"
                         preview-teleported
@@ -283,6 +299,7 @@ onMounted(async () => {
                         class="detail-thumb"
                         :style="{ transform: `rotate(${row.rotation}deg)` }"
                       />
+                      <span v-else class="muted">-</span>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -507,6 +524,22 @@ onMounted(async () => {
 /* row-class-name 加到的是 el-table 内部真实的 <tr>，scoped 样式要用 :deep() 穿透进去 */
 :deep(.qty-diff-row td) {
   background-color: #fef0f0;
+}
+
+/* 退货行：淡淡的暖灰底色区分开，不是"问题"不用标红，跟正常入库行放一起看着别扭就够了 */
+:deep(.return-row td) {
+  background-color: #fafafa;
+  color: #909399;
+}
+
+.return-total-row td {
+  border-bottom: none;
+  color: #f56c6c;
+  font-size: 13px;
+}
+
+.muted {
+  color: #c0c4cc;
 }
 
 /* 手机上应收合计和明细表并排会太挤，改成上下堆叠；应收合计这块也不用再 fit-content
