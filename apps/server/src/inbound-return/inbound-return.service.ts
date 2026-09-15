@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { InboundReturn } from './schemas/inbound-return.schema';
 import { Factory } from '../factory/schemas/factory.schema';
+import { Product } from '../product/schemas/product.schema';
 import { OCR_PROVIDER } from '../ocr/ocr.module';
 import type { OcrProvider } from '../ocr/ocr.types';
 import { CreateInboundReturnDto } from './dto/create-inbound-return.dto';
@@ -37,11 +38,24 @@ export class InboundReturnService {
   constructor(
     @InjectModel(InboundReturn.name) private readonly returnModel: Model<InboundReturn>,
     @InjectModel(Factory.name) private readonly factoryModel: Model<Factory>,
+    @InjectModel(Product.name) private readonly productModel: Model<Product>,
     @Inject(OCR_PROVIDER) private readonly ocr: OcrProvider,
   ) {}
 
-  create(dto: CreateInboundReturnDto) {
-    return this.returnModel.create(dto);
+  /** 工厂价不信前端传的那个数，实时查一下产品档案当前的价格再算金额——跟账单页
+   * "改了产品价格不用回来改历史记录"是同一个原则；查不到产品（没选货号/被删了）
+   * 才退回用调用方给的价格兜底 */
+  private async resolveFactoryPrice(productId: string | null | undefined, fallback = 0): Promise<number> {
+    if (productId) {
+      const product = await this.productModel.findById(productId).lean();
+      if (product) return product.factoryPrice;
+    }
+    return fallback;
+  }
+
+  async create(dto: CreateInboundReturnDto) {
+    const factoryPrice = await this.resolveFactoryPrice(dto.productId, dto.factoryPrice ?? 0);
+    return this.returnModel.create({ ...dto, factoryPrice, amount: dto.qty * factoryPrice });
   }
 
   /** 退货单跟入库单长得一样（货号/名称/重量/克重/数量），直接复用入库单的识别，
@@ -72,7 +86,14 @@ export class InboundReturnService {
   }
 
   async update(id: string, dto: UpdateInboundReturnDto) {
-    const record = await this.returnModel.findByIdAndUpdate(id, dto, { new: true });
+    const existing = await this.returnModel.findById(id);
+    if (!existing) throw new NotFoundException('退货记录不存在');
+
+    const productId = dto.productId !== undefined ? dto.productId : (existing.productId ? String(existing.productId) : null);
+    const qty = dto.qty ?? existing.qty;
+    const factoryPrice = await this.resolveFactoryPrice(productId, dto.factoryPrice ?? existing.factoryPrice);
+
+    const record = await this.returnModel.findByIdAndUpdate(id, { ...dto, factoryPrice, amount: qty * factoryPrice }, { new: true });
     if (!record) throw new NotFoundException('退货记录不存在');
     return record;
   }
