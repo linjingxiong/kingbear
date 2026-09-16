@@ -3,10 +3,11 @@ import { InjectModel } from '@nestjs/mongoose';
 import { AnyKeys, FilterQuery, Model, Types } from 'mongoose';
 import { createHash } from 'crypto';
 import { readFile } from 'fs/promises';
-import { InboundStatus, QuantitySource, type DuplicateConflictResponse, type InboundListRow } from '@kingbear/shared';
+import { InboundStatus, QuantitySource, type DuplicateConflictResponse, type InboundGalleryItem, type InboundListRow } from '@kingbear/shared';
 import { InboundRecord } from './schemas/inbound-record.schema';
 import { ConfirmInboundDto } from './dto/confirm-inbound.dto';
 import { SearchInboundDto } from './dto/search-inbound.dto';
+import { InboundGalleryQueryDto } from './dto/inbound-gallery-query.dto';
 import { OCR_PROVIDER } from '../ocr/ocr.module';
 import type { OcrProvider } from '../ocr/ocr.types';
 import { FactoryService } from '../factory/factory.service';
@@ -260,6 +261,34 @@ export class InboundService {
     const list = rows.slice((page - 1) * pageSize, page * pageSize);
 
     return { list, total, page, pageSize };
+  }
+
+  /**
+   * 入库单相册：按玩具厂/账期筛，只要有原始单据照片的记录，像图片文件夹一样浏览——
+   * 不用一条条点进详情才能看图。手工录入没拍照的记录（imageUrl 是空字符串）不出现在这里。
+   */
+  async gallery(query: InboundGalleryQueryDto): Promise<InboundGalleryItem[]> {
+    const filter: FilterQuery<InboundRecord> = { imageUrl: { $ne: '' } };
+    if (query.factoryId) filter.factoryId = new Types.ObjectId(query.factoryId);
+    if (query.yearMonth) {
+      const [y, m] = query.yearMonth.split('-').map(Number);
+      filter.inboundDate = { $gte: new Date(y, m - 1, 1), $lt: new Date(y, m, 1) };
+    }
+
+    const records = await this.inboundModel.find(filter).sort({ inboundDate: -1, createdAt: -1 }).lean();
+    const factories = await this.factoryService.findAll();
+    const factoryNameMap = new Map(factories.map((f) => [f.id, f.name]));
+
+    return records.map((r) => ({
+      recordId: String(r._id),
+      code: r.code,
+      factoryId: r.factoryId ? String(r.factoryId) : null,
+      factoryName: r.factoryId ? (factoryNameMap.get(String(r.factoryId)) ?? '未知玩具厂') : '未知玩具厂',
+      inboundDate: r.inboundDate.toISOString(),
+      imageUrl: r.imageUrl,
+      rotation: r.rotation,
+      status: r.status,
+    }));
   }
 
   /**

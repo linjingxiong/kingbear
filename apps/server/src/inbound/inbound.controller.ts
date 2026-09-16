@@ -17,6 +17,7 @@ import { ConfirmInboundDto } from './dto/confirm-inbound.dto';
 import { CheckDuplicatesDto } from './dto/check-duplicates.dto';
 import { SearchInboundDto } from './dto/search-inbound.dto';
 import { RotateImageDto } from './dto/rotate-image.dto';
+import { InboundGalleryQueryDto } from './dto/inbound-gallery-query.dto';
 import { inboundImageMulterOptions, toPublicUploadUrl } from '../upload/upload.config';
 
 @Controller('inbound')
@@ -68,6 +69,12 @@ export class InboundController {
   @Get()
   findAll(@Query() query: SearchInboundDto) {
     return this.inboundService.findAll(query);
+  }
+
+  // 字面路径 'gallery' 必须放在 ':id' 前面，不然会被 :id 那个参数路由抢先当成 id 处理
+  @Get('gallery')
+  gallery(@Query() query: InboundGalleryQueryDto) {
+    return this.inboundService.gallery(query);
   }
 
   @Get(':id')

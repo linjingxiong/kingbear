@@ -1,4 +1,4 @@
-import type { ConfirmInboundDto, InboundListRow, InboundRecord, SearchInboundQuery } from "@kingbear/shared";
+import type { ConfirmInboundDto, InboundGalleryItem, InboundGalleryQuery, InboundListRow, InboundRecord, SearchInboundQuery } from "@kingbear/shared";
 import request from "./request";
 
 export function uploadInboundImage(file: File, force = false) {
@@ -46,4 +46,9 @@ export function deleteInbound(id: string) {
 /** 旋转入库单图片：服务端直接把原图文件转正保存，不是前端 CSS 转一下就完事 */
 export function rotateInboundImage(id: string, direction: "left" | "right") {
   return request.post<never, InboundRecord>(`/inbound/${id}/rotate-image`, { direction });
+}
+
+/** 入库单相册：按玩具厂/账期筛，看所有入库单据的原始照片，像图片文件夹一样浏览 */
+export function getInboundGallery(query: InboundGalleryQuery) {
+  return request.get<never, InboundGalleryItem[]>("/inbound/gallery", { params: query });
 }

@@ -110,3 +110,22 @@ export interface InboundListRow {
   factoryPrice: number | null;
   amount: number | null;
 }
+
+/** 入库单相册：按玩具厂/账期筛，不传就是不限 */
+export interface InboundGalleryQuery {
+  factoryId?: string;
+  /** 如 "2026-08"，不传就是所有时间 */
+  yearMonth?: string;
+}
+
+/** 相册里的一张图——一条入库单对应一张原始单据照片（手工录入、没拍照的单子不会出现在这里） */
+export interface InboundGalleryItem {
+  recordId: string;
+  code: string;
+  factoryId: string | null;
+  factoryName: string;
+  inboundDate: string;
+  imageUrl: string;
+  rotation: number;
+  status: InboundStatus;
+}
