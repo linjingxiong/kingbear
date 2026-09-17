@@ -81,7 +81,7 @@ onMounted(load);
 </script>
 
 <template>
-  <el-card>
+  <el-card class="range-card">
     <template #header>
       <div class="panel-header">
         <span>产品加工情况</span>
@@ -131,6 +131,12 @@ onMounted(load);
 </template>
 
 <style scoped>
+/* 桌面端屏幕越宽，这张卡片之前就跟着拉得越宽，货号名称和数字中间空出一大截反而更难对齐着看；
+   限个宽度，数据挤在一起紧凑一点更容易扫。手机等窄屏 max-width 不生效（本来就没那么宽） */
+.range-card {
+  max-width: 900px;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
