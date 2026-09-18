@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import dayjs from "dayjs";
-import * as XLSX from "xlsx";
+// 普通的 xlsx 包（社区版）不支持导出带底色的单元格样式，换成这个兼容同一套 API 的
+// 分支（xlsx-js-style），才能给退货明细里每个产品的标题栏上色
+import * as XLSX from "xlsx-js-style";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
   BillPaymentStatus,
@@ -168,9 +170,9 @@ function exportExcel() {
     return name;
   }
 
-  // 退货相关的 sheet 全部集中放在"汇总"后面这一组，不再跟每个货号自己的出库明细
-  // 交叉排列——先是"退货汇总"（这个账期所有退货，按货号合计一遍，一眼看总数），
-  // 然后紧跟着每个货号各自的退货明细（一条条列出来），最后才是各货号平时的出库明细
+  // 退货不再另外拆 sheet——整个账期所有退货情况都放进这一张"退货汇总"里：
+  // 最上面是按货号合计的总览，往下每个货号自己一段，用一条带底色的标题栏隔开，
+  // 一份表从上到下"先看总数、再看每个产品各自退了哪几笔"
   if (returnDetails.value.length) {
     const bySkuReturn = new Map<string, { sku: string; name: string; qty: number; amount: number }>();
     for (const row of returnDetails.value) {
@@ -182,22 +184,51 @@ function exportExcel() {
         bySkuReturn.set(row.sku, { sku: row.sku, name: row.name, qty: row.qty, amount: row.amount });
       }
     }
-    const returnSummaryRows = [
+
+    const TITLE_STYLE = {
+      fill: { patternType: "solid", fgColor: { rgb: "FF4472C4" } },
+      font: { bold: true, color: { rgb: "FFFFFFFF" } },
+    };
+    const HEADER_STYLE = { font: { bold: true } };
+    const RETURN_COLS = 7; // 时间/名称/重量/克重/退货数量/金额/退货原因，标题栏合并到这么宽
+
+    const rows: (string | number)[][] = [
       ["货号", "名称", "退货数量", "退货金额"],
       ...[...bySkuReturn.values()].map((row) => [row.sku, row.name, row.qty, row.amount]),
       ["退货合计", "", s.returnQty, s.returnAmount],
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(returnSummaryRows), uniqueSheetName("退货汇总", "退货汇总"));
+    const headerStyledRows = [0]; // 上面总览表的表头也加粗
+    const titleRows: number[] = []; // 每个产品的标题栏行号，等会儿统一上底色+合并单元格
 
     for (const sku of bySkuReturn.values()) {
-      const returnRows = returnDetails.value.filter((row) => row.sku === sku.sku);
-      const returnSheetRows = [
-        ["时间", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"],
-        ...returnRows.map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.reason || ""]),
-      ];
-      const returnSheetName = uniqueSheetName(`${sku.sku}${sku.name}退货`, `${sku.sku}退货`);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(returnSheetRows), returnSheetName);
+      rows.push([]); // 空一行隔开，不然一段接一段挤在一起分不清
+      titleRows.push(rows.length);
+      rows.push([`${sku.sku} · ${sku.name}　退货明细`]);
+      headerStyledRows.push(rows.length);
+      rows.push(["时间", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"]);
+      const items = returnDetails.value.filter((row) => row.sku === sku.sku);
+      for (const item of items) {
+        rows.push([item.date, item.name, item.weightJin, item.unitWeightG, item.qty, item.amount, item.reason || ""]);
+      }
     }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!merges"] = titleRows.map((r) => ({ s: { r, c: 0 }, e: { r, c: RETURN_COLS - 1 } }));
+    for (const r of titleRows) {
+      for (let c = 0; c < RETURN_COLS; c++) {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+        ws[ref].s = TITLE_STYLE;
+      }
+    }
+    for (const r of headerStyledRows) {
+      const rowCells = rows[r].length || 4;
+      for (let c = 0; c < rowCells; c++) {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (ws[ref]) ws[ref].s = HEADER_STYLE;
+      }
+    }
+    XLSX.utils.book_append_sheet(wb, ws, uniqueSheetName("退货汇总", "退货汇总"));
   }
 
   // 各货号平时的出库明细，不带退货（退货已经在上面单独一组里了）
