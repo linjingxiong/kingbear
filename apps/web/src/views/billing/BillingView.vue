@@ -134,114 +134,104 @@ async function togglePaymentStatus() {
   handleQuery();
 }
 
-// Excel sheet 名不能带 \ / ? * [ ] : 这几个字符，超过 31 字符会被截断报错，这里统一处理一下
-function toSheetName(name: string) {
-  return name.replace(/[\\/?*[\]:]/g, "-").slice(0, 31);
-}
-
-// 导出当前对账单（这个玩具厂 + 这个账期）为 Excel：一个"汇总" sheet，
-// 后面每个货号单独一个明细 sheet（不受页面右边 tab 当前选的是哪个货号影响，
-// 导出的是"这张对账单"完整数据）。明细不带工厂价、不带异常提示列，
-// 跟原来手工做的台账格式对齐
+// 导出当前对账单（这个玩具厂 + 这个账期）为 Excel：现在只有一张"汇总" sheet，
+// 从头到尾一份完整台账——每个货号自己一段（带底色标题栏），先入库明细+入库小计，
+// 再退货明细+退货小计（没有退货就跳过这一小段），所有货号列完之后，最后是
+// "全部产品汇总"：入库合计、退货合计、净应收合计。不用再翻到别的 sheet 找明细
 function exportExcel() {
   if (!summary.value) return;
   const s = summary.value;
 
-  const summaryRows = [
-    ["货号", "名称", "出货数量", "金额"],
-    ...s.bySku.map((row) => [row.sku, row.name, row.qty, row.amount]),
-    // 按货号汇总/应收合计已经是扣完退货的净数，这两行只是让"这个月退了多少"在导出的
-    // Excel 里也能一眼看到，不是要另外加减
-    ...(s.returnAmount > 0 ? [["其中：本期退货", "", -s.returnQty, -s.returnAmount]] : []),
-    ["应收合计", "", s.totalQty, s.totalAmount],
-  ];
+  const TITLE_STYLE = {
+    fill: { patternType: "solid", fgColor: { rgb: "FF4472C4" } },
+    font: { bold: true, color: { rgb: "FFFFFFFF" } },
+  };
+  const HEADER_STYLE = { font: { bold: true } };
+  const SUBTOTAL_STYLE = {
+    fill: { patternType: "solid", fgColor: { rgb: "FFF2F2F2" } },
+    font: { bold: true },
+  };
+  const COLS = 7; // 时间/名称/重量/克重/数量/金额/退货原因——标题栏统一合并到这么宽
+
+  const rows: (string | number)[][] = [];
+  const titleRows: number[] = [];
+  const headerRows: number[] = [];
+  const subtotalRows: number[] = [];
+
+  let totalInboundQty = 0;
+  let totalInboundAmount = 0;
+
+  for (const sku of s.bySku) {
+    if (rows.length) rows.push([]); // 货号之间空一行，不然一段接一段挤在一起分不清
+    titleRows.push(rows.length);
+    rows.push([`${sku.sku} · ${sku.name}`]);
+
+    headerRows.push(rows.length);
+    rows.push(["时间", "名称", "重量/斤", "克重/g", "入库数量", "金额"]);
+    const inboundRows = s.details.filter((row) => row.sku === sku.sku && !row.isReturn);
+    let inQty = 0;
+    let inAmount = 0;
+    for (const row of inboundRows) {
+      rows.push([row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount]);
+      inQty += row.qty;
+      inAmount += row.amount;
+    }
+    subtotalRows.push(rows.length);
+    rows.push(["入库小计", "", inQty, inAmount]);
+    totalInboundQty += inQty;
+    totalInboundAmount += inAmount;
+
+    const skuReturnRows = returnDetails.value.filter((row) => row.sku === sku.sku);
+    if (skuReturnRows.length) {
+      headerRows.push(rows.length);
+      rows.push(["时间", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"]);
+      let rQty = 0;
+      let rAmount = 0;
+      for (const row of skuReturnRows) {
+        rows.push([row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.reason || ""]);
+        rQty += row.qty;
+        rAmount += row.amount;
+      }
+      subtotalRows.push(rows.length);
+      rows.push(["退货小计", "", rQty, rAmount]);
+    }
+  }
+
+  rows.push([]);
+  titleRows.push(rows.length);
+  rows.push(["全部产品汇总"]);
+  subtotalRows.push(rows.length);
+  rows.push(["入库合计", "", totalInboundQty, totalInboundAmount]);
+  subtotalRows.push(rows.length);
+  rows.push(["退货合计", "", s.returnQty, s.returnAmount]);
+  subtotalRows.push(rows.length);
+  rows.push(["净应收合计", "", s.totalQty, s.totalAmount]);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!merges"] = titleRows.map((r) => ({ s: { r, c: 0 }, e: { r, c: COLS - 1 } }));
+  for (const r of titleRows) {
+    for (let c = 0; c < COLS; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+      ws[ref].s = TITLE_STYLE;
+    }
+  }
+  for (const r of headerRows) {
+    for (let c = 0; c < rows[r].length; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (ws[ref]) ws[ref].s = HEADER_STYLE;
+    }
+  }
+  for (const r of subtotalRows) {
+    for (let c = 0; c < 4; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+      ws[ref].s = SUBTOTAL_STYLE;
+    }
+  }
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "汇总");
-
-  const usedNames = new Set<string>(["汇总"]);
-
-  // 货号+名称截断到 31 字符后偶尔会撞名（Excel sheet 名长度限制），撞了就退化成
-  // 只用一个更短的后备名，尽量还是保留可读性而不是直接编号
-  function uniqueSheetName(preferred: string, fallback: string) {
-    let name = toSheetName(preferred);
-    if (usedNames.has(name)) name = toSheetName(fallback);
-    usedNames.add(name);
-    return name;
-  }
-
-  // 退货不再另外拆 sheet——整个账期所有退货情况都放进这一张"退货汇总"里：
-  // 最上面是按货号合计的总览，往下每个货号自己一段，用一条带底色的标题栏隔开，
-  // 一份表从上到下"先看总数、再看每个产品各自退了哪几笔"
-  if (returnDetails.value.length) {
-    const bySkuReturn = new Map<string, { sku: string; name: string; qty: number; amount: number }>();
-    for (const row of returnDetails.value) {
-      const existing = bySkuReturn.get(row.sku);
-      if (existing) {
-        existing.qty += row.qty;
-        existing.amount += row.amount;
-      } else {
-        bySkuReturn.set(row.sku, { sku: row.sku, name: row.name, qty: row.qty, amount: row.amount });
-      }
-    }
-
-    const TITLE_STYLE = {
-      fill: { patternType: "solid", fgColor: { rgb: "FF4472C4" } },
-      font: { bold: true, color: { rgb: "FFFFFFFF" } },
-    };
-    const HEADER_STYLE = { font: { bold: true } };
-    const RETURN_COLS = 7; // 时间/名称/重量/克重/退货数量/金额/退货原因，标题栏合并到这么宽
-
-    const rows: (string | number)[][] = [
-      ["货号", "名称", "退货数量", "退货金额"],
-      ...[...bySkuReturn.values()].map((row) => [row.sku, row.name, row.qty, row.amount]),
-      ["退货合计", "", s.returnQty, s.returnAmount],
-    ];
-    const headerStyledRows = [0]; // 上面总览表的表头也加粗
-    const titleRows: number[] = []; // 每个产品的标题栏行号，等会儿统一上底色+合并单元格
-
-    for (const sku of bySkuReturn.values()) {
-      rows.push([]); // 空一行隔开，不然一段接一段挤在一起分不清
-      titleRows.push(rows.length);
-      rows.push([`${sku.sku} · ${sku.name}　退货明细`]);
-      headerStyledRows.push(rows.length);
-      rows.push(["时间", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"]);
-      const items = returnDetails.value.filter((row) => row.sku === sku.sku);
-      for (const item of items) {
-        rows.push([item.date, item.name, item.weightJin, item.unitWeightG, item.qty, item.amount, item.reason || ""]);
-      }
-    }
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws["!merges"] = titleRows.map((r) => ({ s: { r, c: 0 }, e: { r, c: RETURN_COLS - 1 } }));
-    for (const r of titleRows) {
-      for (let c = 0; c < RETURN_COLS; c++) {
-        const ref = XLSX.utils.encode_cell({ r, c });
-        if (!ws[ref]) ws[ref] = { t: "s", v: "" };
-        ws[ref].s = TITLE_STYLE;
-      }
-    }
-    for (const r of headerStyledRows) {
-      const rowCells = rows[r].length || 4;
-      for (let c = 0; c < rowCells; c++) {
-        const ref = XLSX.utils.encode_cell({ r, c });
-        if (ws[ref]) ws[ref].s = HEADER_STYLE;
-      }
-    }
-    XLSX.utils.book_append_sheet(wb, ws, uniqueSheetName("退货汇总", "退货汇总"));
-  }
-
-  // 各货号平时的出库明细，不带退货（退货已经在上面单独一组里了）
-  for (const sku of s.bySku) {
-    const inboundRows = s.details.filter((row) => row.sku === sku.sku && !row.isReturn);
-    const detailRows = [
-      ["时间", "名称", "重量/斤", "克重/g", "出货数量", "金额"],
-      ...inboundRows.map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount]),
-    ];
-    const sheetName = uniqueSheetName(`${sku.sku}${sku.name}`, sku.sku);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailRows), sheetName);
-  }
-
+  XLSX.utils.book_append_sheet(wb, ws, "汇总");
   XLSX.writeFile(wb, `对账单_${s.factoryName}_${s.yearMonth}.xlsx`);
 }
 
