@@ -33,6 +33,17 @@ const filteredDetails = computed(() => {
   return summary.value.details.filter((d) => d.sku === skuFilter.value);
 });
 
+/** 退货明细单独一份完整列表——上面的流水表是入库/退货混排、按日期看节奏用的，
+ * 这里专门把这个账期里所有退货记录摘出来，不受货号 tab 筛选影响，一次性看全（不然
+ * 混在几十条入库记录里翻着找不方便）。qty/amount 这里改成正数展示——反正整张表都是
+ * 退货，不用再靠负号提醒 */
+const returnDetails = computed(() => {
+  if (!summary.value) return [];
+  return summary.value.details
+    .filter((d) => d.isReturn)
+    .map((d) => ({ ...d, qty: Math.abs(d.qty), amount: Math.abs(d.amount) }));
+});
+
 async function loadFactories() {
   factories.value = await listFactories();
   if (!factoryId.value && factories.value.length) {
@@ -147,6 +158,17 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "汇总");
 
   const usedNames = new Set<string>(["汇总"]);
+
+  // 退货单独一份完整明细 sheet，带上退货原因——跟货号拆开的那几个 sheet 是两种视角，
+  // 这份是"这个月退了哪些"一次看全，不用去每个货号 sheet 里再挑出标"退货"的那几行
+  if (returnDetails.value.length) {
+    const returnRows = [
+      ["日期", "货号", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"],
+      ...returnDetails.value.map((row) => [row.date, row.sku, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.reason || ""]),
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(returnRows), "退货明细");
+    usedNames.add("退货明细");
+  }
   for (const sku of s.bySku) {
     const detailRows = [
       ["时间", "名称", "重量/斤", "克重/g", "出货数量", "金额", "类型"],
@@ -321,6 +343,50 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+
+          <!-- 完整退货明细：上面的流水表是入库/退货混排、按日期看节奏用的，退货记录本来就少，
+               混在几十条入库记录里翻着找不方便，这里单独摘一份全的出来，不受货号 tab 筛选影响，
+               有退货才显示这一块，没有就不占地方 -->
+          <div v-if="returnDetails.length" class="return-section">
+            <div class="return-section-title">退货明细（共 {{ returnDetails.length }} 条）</div>
+            <el-table :data="returnDetails" border size="small">
+              <el-table-column prop="date" label="日期" width="110" />
+              <el-table-column prop="sku" label="货号" width="90" />
+              <el-table-column prop="name" label="名称" width="140" show-overflow-tooltip />
+              <el-table-column label="重量(斤)" width="90" align="right">
+                <template #default="{ row }">{{ row.weightJin }}</template>
+              </el-table-column>
+              <el-table-column label="单个克重(g)" width="110" align="right">
+                <template #default="{ row }">{{ row.unitWeightG }}</template>
+              </el-table-column>
+              <el-table-column label="退货数量" width="110" align="right">
+                <template #default="{ row }">{{ row.qty.toLocaleString() }}</template>
+              </el-table-column>
+              <el-table-column label="工厂价" width="90" align="right">
+                <template #default="{ row }">{{ row.factoryPrice.toFixed(4) }}</template>
+              </el-table-column>
+              <el-table-column label="退货金额" width="120" align="right">
+                <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
+              </el-table-column>
+              <el-table-column prop="reason" label="退货原因" width="140" show-overflow-tooltip>
+                <template #default="{ row }">{{ row.reason || "-" }}</template>
+              </el-table-column>
+              <el-table-column label="凭证" width="70" align="center">
+                <template #default="{ row }">
+                  <el-image
+                    v-if="row.imageUrl"
+                    :src="row.imageUrl"
+                    :preview-src-list="[row.imageUrl]"
+                    preview-teleported
+                    fit="cover"
+                    class="detail-thumb"
+                    :style="{ transform: `rotate(${row.rotation}deg)` }"
+                  />
+                  <span v-else class="muted">-</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
         </template>
         <el-empty v-else description="该月暂无入库记录" />
       </template>
@@ -446,6 +512,18 @@ onMounted(async () => {
   margin-top: 16px;
   flex: 1;
   min-height: 0;
+}
+
+.return-section {
+  margin-top: 20px;
+  flex: 0 0 auto;
+}
+
+.return-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
 }
 
 /* 应收合计只随内容撑高度就行，不跟着右边明细表一起被拉满——align-self: flex-start
