@@ -17,6 +17,11 @@ COPY apps/web apps/web
 RUN pnpm --filter @kingbear/shared build && pnpm --filter @kingbear/web build
 
 FROM nginx:alpine AS runtime
+# 官方镜像自带的这个入口脚本会跑 `apk manifest nginx` 去跟默认配置文件的校验和比对，
+# 决定要不要自动往配置里塞一行 IPv6 监听——这台服务器上这一步会莫名卡死（复现了两次，
+# 不是偶发的），CPU/磁盘 IO 都是空的，像是卡在某个系统调用上，一直等不到超时。我们自己的
+# nginx.conf 是完整的静态配置，不需要这个自动改写功能，直接删掉这个脚本绕开这个坑
+RUN rm -f /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /repo/apps/web/dist /usr/share/nginx/html
 EXPOSE 80
