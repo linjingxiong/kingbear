@@ -147,7 +147,18 @@ function exportExcel() {
     font: { bold: true, color: { rgb: "FFFFFFFF" } },
   };
   const HEADER_STYLE = { font: { bold: true } };
-  const SUBTOTAL_STYLE = {
+  // 入库小计绿字、退货小计红字——跟色不跟底，字色本身就是"这行是入库还是退货"的标记，
+  // 灰底继续保留（跟标题栏、普通明细行拉开层次）
+  type CellStyle = { fill: { patternType: string; fgColor: { rgb: string } }; font: { bold: boolean; color?: { rgb: string } } };
+  const INBOUND_SUBTOTAL_STYLE: CellStyle = {
+    fill: { patternType: "solid", fgColor: { rgb: "FFF2F2F2" } },
+    font: { bold: true, color: { rgb: "FF2E7D32" } },
+  };
+  const RETURN_SUBTOTAL_STYLE: CellStyle = {
+    fill: { patternType: "solid", fgColor: { rgb: "FFF2F2F2" } },
+    font: { bold: true, color: { rgb: "FFC0392B" } },
+  };
+  const NET_TOTAL_STYLE: CellStyle = {
     fill: { patternType: "solid", fgColor: { rgb: "FFF2F2F2" } },
     font: { bold: true },
   };
@@ -156,7 +167,13 @@ function exportExcel() {
   const rows: (string | number)[][] = [];
   const titleRows: number[] = [];
   const headerRows: number[] = [];
-  const subtotalRows: number[] = [];
+  const labelRows: number[] = []; // "退货"这种纯文字小标题，加粗但不用整行底色
+  const inboundSubtotalRows: number[] = [];
+  const returnSubtotalRows: number[] = [];
+  const netTotalRows: number[] = [];
+
+  // 每个产品各自入库/退货多少，最后"全部产品汇总"里要按产品列一遍，这里边算边记下来
+  const perSkuTotals: { sku: string; name: string; inQty: number; inAmount: number; rQty: number; rAmount: number }[] = [];
 
   let totalInboundQty = 0;
   let totalInboundAmount = 0;
@@ -176,35 +193,45 @@ function exportExcel() {
       inQty += row.qty;
       inAmount += row.amount;
     }
-    subtotalRows.push(rows.length);
+    inboundSubtotalRows.push(rows.length);
     rows.push(["入库小计", "", inQty, inAmount]);
     totalInboundQty += inQty;
     totalInboundAmount += inAmount;
 
     const skuReturnRows = returnDetails.value.filter((row) => row.sku === sku.sku);
+    let rQty = 0;
+    let rAmount = 0;
     if (skuReturnRows.length) {
+      labelRows.push(rows.length);
+      rows.push(["退货"]);
       headerRows.push(rows.length);
       rows.push(["时间", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"]);
-      let rQty = 0;
-      let rAmount = 0;
       for (const row of skuReturnRows) {
         rows.push([row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.reason || ""]);
         rQty += row.qty;
         rAmount += row.amount;
       }
-      subtotalRows.push(rows.length);
+      returnSubtotalRows.push(rows.length);
       rows.push(["退货小计", "", rQty, rAmount]);
     }
+
+    perSkuTotals.push({ sku: sku.sku, name: sku.name, inQty, inAmount, rQty, rAmount });
   }
 
+  // 全部产品汇总：先按产品列一遍各自入库/退货多少，再是三行总计
   rows.push([]);
   titleRows.push(rows.length);
   rows.push(["全部产品汇总"]);
-  subtotalRows.push(rows.length);
+  headerRows.push(rows.length);
+  rows.push(["货号", "名称", "入库数量", "入库金额", "退货数量", "退货金额"]);
+  for (const t of perSkuTotals) {
+    rows.push([t.sku, t.name, t.inQty, t.inAmount, t.rQty, t.rAmount]);
+  }
+  inboundSubtotalRows.push(rows.length);
   rows.push(["入库合计", "", totalInboundQty, totalInboundAmount]);
-  subtotalRows.push(rows.length);
+  returnSubtotalRows.push(rows.length);
   rows.push(["退货合计", "", s.returnQty, s.returnAmount]);
-  subtotalRows.push(rows.length);
+  netTotalRows.push(rows.length);
   rows.push(["净应收合计", "", s.totalQty, s.totalAmount]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
@@ -216,19 +243,24 @@ function exportExcel() {
       ws[ref].s = TITLE_STYLE;
     }
   }
-  for (const r of headerRows) {
-    for (let c = 0; c < rows[r].length; c++) {
+  for (const r of [...headerRows, ...labelRows]) {
+    for (let c = 0; c < Math.max(rows[r].length, 1); c++) {
       const ref = XLSX.utils.encode_cell({ r, c });
       if (ws[ref]) ws[ref].s = HEADER_STYLE;
     }
   }
-  for (const r of subtotalRows) {
-    for (let c = 0; c < 4; c++) {
-      const ref = XLSX.utils.encode_cell({ r, c });
-      if (!ws[ref]) ws[ref] = { t: "s", v: "" };
-      ws[ref].s = SUBTOTAL_STYLE;
+  const styleRows = (rowNumbers: number[], style: CellStyle) => {
+    for (const r of rowNumbers) {
+      for (let c = 0; c < 6; c++) {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+        ws[ref].s = style;
+      }
     }
-  }
+  };
+  styleRows(inboundSubtotalRows, INBOUND_SUBTOTAL_STYLE);
+  styleRows(returnSubtotalRows, RETURN_SUBTOTAL_STYLE);
+  styleRows(netTotalRows, NET_TOTAL_STYLE);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "汇总");
