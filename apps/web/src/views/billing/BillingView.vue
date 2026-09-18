@@ -79,17 +79,28 @@ function rowClassName({ row }: { row: BillingDetailRow }) {
   return "";
 }
 
+// 玩具厂/账期下拉切换很快的时候（比如手滑连点了两次月份），网络延迟不保证请求
+// 谁先谁后到——后发的（新选的月份）请求如果先回来，紧接着旧的（之前选的月份）请求
+// 才姗姗来迟，会把新数据覆盖掉，页面上选着"8月"却显示着"9月"的数据。用一个自增票号，
+// 只采纳"最后发出的那次请求"的结果，晚到的旧请求直接丢弃
+let queryTicket = 0;
+
 async function handleQuery() {
   if (!factoryId.value || !yearMonth.value) {
     ElMessage.warning("请选择玩具厂和时间范围");
     return;
   }
+  const ticket = ++queryTicket;
   loading.value = true;
   skuFilter.value = "";
   try {
-    summary.value = await getBillingSummary(factoryId.value, yearMonth.value);
+    const result = await getBillingSummary(factoryId.value, yearMonth.value);
+    if (ticket !== queryTicket) return; // 这次请求发出去之后又有更新的查询发生了，这次的结果作废
+    summary.value = result;
   } finally {
-    loading.value = false;
+    // 同理：作废的这次也不该去关掉 loading——可能还有更新的那次请求正在飞着，
+    // 关早了会出现"转圈还没转完就消失了"的闪烁
+    if (ticket === queryTicket) loading.value = false;
   }
 }
 
