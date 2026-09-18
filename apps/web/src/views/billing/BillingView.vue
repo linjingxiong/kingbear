@@ -193,8 +193,10 @@ function exportExcel() {
       inQty += row.qty;
       inAmount += row.amount;
     }
+    // 上面表头是 时间/名称/重量/克重/入库数量/金额，数量金额在 E/F 列——小计要跟这两列对齐，
+    // 不能只摆4个格子（那样会顶到"重量/克重"那两列去，跟标题斜着看好像对上了、其实错位了）
     inboundSubtotalRows.push(rows.length);
-    rows.push(["入库小计", "", inQty, inAmount]);
+    rows.push(["入库小计", "", "", "", inQty, inAmount]);
     totalInboundQty += inQty;
     totalInboundAmount += inAmount;
 
@@ -211,8 +213,9 @@ function exportExcel() {
         rQty += row.qty;
         rAmount += row.amount;
       }
+      // 退货表头是 时间/名称/重量/克重/退货数量/金额/退货原因，同理数量金额对齐 E/F 列
       returnSubtotalRows.push(rows.length);
-      rows.push(["退货小计", "", rQty, rAmount]);
+      rows.push(["退货小计", "", "", "", rQty, rAmount]);
     }
 
     perSkuTotals.push({ sku: sku.sku, name: sku.name, inQty, inAmount, rQty, rAmount });
@@ -227,12 +230,16 @@ function exportExcel() {
   for (const t of perSkuTotals) {
     rows.push([t.sku, t.name, t.inQty, t.inAmount, t.rQty, t.rAmount]);
   }
+  // 上面这张按产品列的表，表头是 货号/名称/入库数量/入库金额/退货数量/退货金额——
+  // "入库合计"对应 C/D 列，"退货合计"对应 E/F 列，两者含义不一样、不能都摆在 C/D。
+  // "净应收合计"两个都不是（是入库和退货抵完之后的净数），用"数量/金额"文字自己标出来，
+  // 不依赖上面表头哪一列，看着才不会以为它是"入库数量"或"退货数量"
   inboundSubtotalRows.push(rows.length);
   rows.push(["入库合计", "", totalInboundQty, totalInboundAmount]);
   returnSubtotalRows.push(rows.length);
-  rows.push(["退货合计", "", s.returnQty, s.returnAmount]);
+  rows.push(["退货合计", "", "", "", s.returnQty, s.returnAmount]);
   netTotalRows.push(rows.length);
-  rows.push(["净应收合计", "", s.totalQty, s.totalAmount]);
+  rows.push(["净应收合计", "", "数量", s.totalQty, "金额", s.totalAmount]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!merges"] = titleRows.map((r) => ({ s: { r, c: 0 }, e: { r, c: COLS - 1 } }));
