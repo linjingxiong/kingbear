@@ -159,28 +159,36 @@ function exportExcel() {
 
   const usedNames = new Set<string>(["汇总"]);
 
-  // 退货单独一份完整明细 sheet，带上退货原因——跟货号拆开的那几个 sheet 是两种视角，
-  // 这份是"这个月退了哪些"一次看全，不用去每个货号 sheet 里再挑出标"退货"的那几行
-  if (returnDetails.value.length) {
-    const returnRows = [
-      ["日期", "货号", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"],
-      ...returnDetails.value.map((row) => [row.date, row.sku, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.reason || ""]),
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(returnRows), "退货明细");
-    usedNames.add("退货明细");
+  // 货号+名称截断到 31 字符后偶尔会撞名（Excel sheet 名长度限制），撞了就退化成
+  // 只用一个更短的后备名，尽量还是保留可读性而不是直接编号
+  function uniqueSheetName(preferred: string, fallback: string) {
+    let name = toSheetName(preferred);
+    if (usedNames.has(name)) name = toSheetName(fallback);
+    usedNames.add(name);
+    return name;
   }
+
+  // 每个货号一份出库明细 + 有退货的话紧跟着一份退货明细，两份分开、不再混在一张表里
+  // 靠"类型"这一列区分——一个货号在这个账期里，出库和退货是两件事，拆成两个 sheet
+  // 更清楚，跟财务实际对账时"先看发了多少、再看退了多少"的顺序也对得上
   for (const sku of s.bySku) {
+    const inboundRows = s.details.filter((row) => row.sku === sku.sku && !row.isReturn);
     const detailRows = [
-      ["时间", "名称", "重量/斤", "克重/g", "出货数量", "金额", "类型"],
-      ...s.details
-        .filter((row) => row.sku === sku.sku)
-        .map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.isReturn ? "退货" : ""]),
+      ["时间", "名称", "重量/斤", "克重/g", "出货数量", "金额"],
+      ...inboundRows.map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount]),
     ];
-    let sheetName = toSheetName(`${sku.sku}${sku.name}`);
-    // 货号+名称截断后偶尔会撞名，撞了就退化成只用货号，货号本身在 bySku 里是唯一的
-    if (usedNames.has(sheetName)) sheetName = toSheetName(sku.sku);
-    usedNames.add(sheetName);
+    const sheetName = uniqueSheetName(`${sku.sku}${sku.name}`, sku.sku);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(detailRows), sheetName);
+
+    const returnRows = returnDetails.value.filter((row) => row.sku === sku.sku);
+    if (returnRows.length) {
+      const returnSheetRows = [
+        ["时间", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"],
+        ...returnRows.map((row) => [row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.reason || ""]),
+      ];
+      const returnSheetName = uniqueSheetName(`${sku.sku}${sku.name}退货`, `${sku.sku}退货`);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(returnSheetRows), returnSheetName);
+    }
   }
 
   XLSX.writeFile(wb, `对账单_${s.factoryName}_${s.yearMonth}.xlsx`);
