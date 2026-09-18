@@ -340,7 +340,7 @@ onMounted(async () => {
               </el-tabs>
 
               <div class="statement-detail">
-                <el-table :data="filteredDetails" border size="small" height="100%" :row-class-name="rowClassName">
+                <el-table :data="filteredDetails" border size="small" max-height="480" :row-class-name="rowClassName">
                   <el-table-column prop="date" label="日期" width="110" />
                   <el-table-column label="货号" width="90">
                     <template #default="{ row }">
@@ -408,7 +408,7 @@ onMounted(async () => {
                有退货才显示这一块，没有就不占地方 -->
           <div v-if="returnDetails.length" class="return-section">
             <div class="return-section-title">退货明细（共 {{ returnDetails.length }} 条）</div>
-            <el-table :data="returnDetails" border size="small">
+            <el-table :data="returnDetails" border size="small" max-height="400">
               <el-table-column prop="date" label="日期" width="110" />
               <el-table-column prop="sku" label="货号" width="90" />
               <el-table-column prop="name" label="名称" width="140" show-overflow-tooltip />
@@ -457,17 +457,20 @@ onMounted(async () => {
 /* 让卡片一路撑到浏览器可视区域底部，而不是内容多高页面就多高、下面剩一大截空白。
    .main（BasicLayout 里滚动的那个容器）本身已经是撑满视口剩余高度的，这里只要
    让这个页面的根节点和卡片跟着一路 height:100% / flex:1 传下去就行 */
+/* 之前这里是 height:100% 精确撑满可视区域、内部明细表 height="100%" 再吃掉剩余高度、
+   表格自己滚动——这套设计的前提是"卡片里最后一块内容就是那张明细表"。后来加了退货明细
+   这块内容要接在明细表下面，撑满视口的卡片就没地方给它，会跟明细表叠在一起。
+   改成让卡片按内容自然撑高，整页交给 BasicLayout 的 .main 去滚动（它本来就有
+   overflow:auto），明细表用 max-height 代替 height，数据少的时候刚好那么高，
+   数据多才出现自己的滚动条——两种情况都不会跟下面的退货明细撞在一起 */
 .billing-page {
   display: flex;
   flex-direction: column;
-  height: 100%;
 }
 
 .statement-card {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 
 /* 绿色印章：双层圆圈 + 旋转 + 半透明，模拟盖在纸质单据上的实体章。挂在"应收合计"
@@ -515,10 +518,8 @@ onMounted(async () => {
 }
 
 .statement-card :deep(.el-card__body) {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 
 /* 汇总信息、明细表、合计放进同一张卡片里，看着就是一张完整的对账单，
@@ -569,8 +570,6 @@ onMounted(async () => {
   align-items: stretch;
   gap: 24px;
   margin-top: 16px;
-  flex: 1;
-  min-height: 0;
 }
 
 .return-section {
@@ -600,13 +599,12 @@ onMounted(async () => {
   position: relative;
 }
 
-/* 明细这一侧（tab + 表格）占满剩下的宽度，同时纵向也是 tab 固定、表格吃掉剩下的高度 */
+/* 明细这一侧（tab + 表格）占满剩下的宽度 */
 .statement-detail-wrap {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 
 .sku-tabs {
@@ -614,11 +612,10 @@ onMounted(async () => {
   flex: 0 0 auto;
 }
 
-/* el-table 绑了 height="100%"，靠这个容器有确定高度撑满剩余空间，多出来的行自己滚动 */
+/* el-table 用 max-height 代替原来的 height="100%"：数据少就按内容自然高度显示，
+   超过这个高度才出现表格自己的滚动条，不会撑满整个视口 */
 .statement-detail {
   margin-top: 16px;
-  flex: 1;
-  min-height: 0;
 }
 
 /* 按货号分开的汇总小表，做成正式单据常见的那种简洁线条风格（不是 el-table 那套），
