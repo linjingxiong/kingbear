@@ -134,140 +134,195 @@ async function togglePaymentStatus() {
   handleQuery();
 }
 
-// 导出当前对账单（这个玩具厂 + 这个账期）为 Excel：现在只有一张"汇总" sheet，
-// 从头到尾一份完整台账——每个货号自己一段（带底色标题栏），先入库明细+入库小计，
-// 再退货明细+退货小计（没有退货就跳过这一小段），所有货号列完之后，最后是
-// "全部产品汇总"：入库合计、退货合计、净应收合计。不用再翻到别的 sheet 找明细
+// 导出当前对账单（这个玩具厂 + 这个账期）为 Excel：现在只有一张"汇总" sheet。
+// 每个货号一段，左右并排两块——左边绿底"入库"、右边红底"退货"（没有退货就不出现这块），
+// 最左边一列是竖向合并的产品名称，跨这个货号入库+退货的整个高度，一眼就知道这一大片
+// 都是同一个产品的。所有货号排完之后，最后是"全部产品汇总"。
 function exportExcel() {
   if (!summary.value) return;
   const s = summary.value;
 
-  const TITLE_STYLE = {
+  type CellStyle = {
+    fill?: { patternType: string; fgColor: { rgb: string } };
+    font?: { bold?: boolean; color?: { rgb: string } };
+    alignment?: { horizontal?: string; vertical?: string; wrapText?: boolean };
+  };
+  const TITLE_STYLE: CellStyle = {
     fill: { patternType: "solid", fgColor: { rgb: "FF4472C4" } },
     font: { bold: true, color: { rgb: "FFFFFFFF" } },
+    alignment: { horizontal: "center", vertical: "center", wrapText: true },
   };
-  const HEADER_STYLE = { font: { bold: true } };
-  // 入库小计绿字、退货小计红字——跟色不跟底，字色本身就是"这行是入库还是退货"的标记，
-  // 灰底继续保留（跟标题栏、普通明细行拉开层次）
-  type CellStyle = { fill: { patternType: string; fgColor: { rgb: string } }; font: { bold: boolean; color?: { rgb: string } } };
-  const INBOUND_SUBTOTAL_STYLE: CellStyle = {
-    fill: { patternType: "solid", fgColor: { rgb: "FFF2F2F2" } },
-    font: { bold: true, color: { rgb: "FF2E7D32" } },
+  const INBOUND_HEADER_STYLE: CellStyle = {
+    fill: { patternType: "solid", fgColor: { rgb: "FF70AD47" } },
+    font: { bold: true, color: { rgb: "FFFFFFFF" } },
+    alignment: { horizontal: "center" },
   };
-  const RETURN_SUBTOTAL_STYLE: CellStyle = {
-    fill: { patternType: "solid", fgColor: { rgb: "FFF2F2F2" } },
-    font: { bold: true, color: { rgb: "FFC0392B" } },
+  const RETURN_HEADER_STYLE: CellStyle = {
+    fill: { patternType: "solid", fgColor: { rgb: "FFC00000" } },
+    font: { bold: true, color: { rgb: "FFFFFFFF" } },
+    alignment: { horizontal: "center" },
   };
+  const SUB_HEADER_STYLE: CellStyle = { font: { bold: true } };
+  const INBOUND_TOTAL_STYLE: CellStyle = { font: { bold: true, color: { rgb: "FF2E7D32" } } };
+  const RETURN_TOTAL_STYLE: CellStyle = { font: { bold: true, color: { rgb: "FFC0392B" } } };
   const NET_TOTAL_STYLE: CellStyle = {
     fill: { patternType: "solid", fgColor: { rgb: "FFF2F2F2" } },
     font: { bold: true },
   };
-  const COLS = 7; // 时间/名称/重量/克重/数量/金额/退货原因——标题栏统一合并到这么宽
 
-  const rows: (string | number)[][] = [];
-  const titleRows: number[] = [];
-  const headerRows: number[] = [];
-  const labelRows: number[] = []; // "退货"这种纯文字小标题，加粗但不用整行底色
-  const inboundSubtotalRows: number[] = [];
-  const returnSubtotalRows: number[] = [];
-  const netTotalRows: number[] = [];
+  // 列布局：A=产品名称，B-F=入库（时间/重量/克重/数量/金额），G=空一列隔开，H-L=退货（同样5列）
+  const COL = { title: 0, inStart: 1, inEnd: 5, retStart: 7, retEnd: 11 };
+  const TOTAL_COLS = 12;
 
-  // 每个产品各自入库/退货多少，最后"全部产品汇总"里要按产品列一遍，这里边算边记下来
+  const grid: (string | number)[][] = [];
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [];
+  const styleCmds: { r: number; c: number; style: CellStyle }[] = [];
+
+  function newRow(): number {
+    grid.push(new Array(TOTAL_COLS).fill(""));
+    return grid.length - 1;
+  }
+  function setCell(r: number, c: number, v: string | number) {
+    grid[r][c] = v;
+  }
+  function styleRange(r: number, cStart: number, cEnd: number, style: CellStyle) {
+    for (let c = cStart; c <= cEnd; c++) styleCmds.push({ r, c, style });
+  }
+
   const perSkuTotals: { sku: string; name: string; inQty: number; inAmount: number; rQty: number; rAmount: number }[] = [];
-
   let totalInboundQty = 0;
   let totalInboundAmount = 0;
 
   for (const sku of s.bySku) {
-    if (rows.length) rows.push([]); // 货号之间空一行，不然一段接一段挤在一起分不清
-    titleRows.push(rows.length);
-    rows.push([`${sku.sku} · ${sku.name}`]);
+    if (grid.length) newRow(); // 货号之间空一行
 
-    headerRows.push(rows.length);
-    rows.push(["时间", "名称", "重量/斤", "克重/g", "入库数量", "金额"]);
+    const titleRow = newRow();
+    styleRange(titleRow, COL.inStart, COL.inEnd, INBOUND_HEADER_STYLE);
+    setCell(titleRow, COL.inStart, "入库");
+    merges.push({ s: { r: titleRow, c: COL.inStart }, e: { r: titleRow, c: COL.inEnd } });
+
+    const subHeaderRow = newRow();
+    const inboundHeaders = ["时间", "重量/斤", "克重/g", "入库数量", "金额"];
+    inboundHeaders.forEach((h, i) => setCell(subHeaderRow, COL.inStart + i, h));
+    styleRange(subHeaderRow, COL.inStart, COL.inEnd, SUB_HEADER_STYLE);
+
     const inboundRows = s.details.filter((row) => row.sku === sku.sku && !row.isReturn);
+    const skuReturnRows = returnDetails.value.filter((row) => row.sku === sku.sku);
+    const hasReturn = skuReturnRows.length > 0;
+
+    if (hasReturn) {
+      setCell(titleRow, COL.retStart, "退货");
+      styleRange(titleRow, COL.retStart, COL.retEnd, RETURN_HEADER_STYLE);
+      merges.push({ s: { r: titleRow, c: COL.retStart }, e: { r: titleRow, c: COL.retEnd } });
+
+      const returnHeaders = ["时间", "重量/斤", "克重/g", "退货数量", "金额"];
+      returnHeaders.forEach((h, i) => setCell(subHeaderRow, COL.retStart + i, h));
+      styleRange(subHeaderRow, COL.retStart, COL.retEnd, SUB_HEADER_STYLE);
+    }
+
+    // 入库、退货两边行数通常对不上（比如22条入库、8条退货），按较长的那边定行数，
+    // 短的那边自然空着——两块share同一批行号，才能真正做到"左右并排"
+    const dataRowCount = hasReturn ? Math.max(inboundRows.length, skuReturnRows.length) : inboundRows.length;
     let inQty = 0;
     let inAmount = 0;
-    for (const row of inboundRows) {
-      rows.push([row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount]);
-      inQty += row.qty;
-      inAmount += row.amount;
-    }
-    // 上面表头是 时间/名称/重量/克重/入库数量/金额，数量金额在 E/F 列——小计要跟这两列对齐，
-    // 不能只摆4个格子（那样会顶到"重量/克重"那两列去，跟标题斜着看好像对上了、其实错位了）
-    inboundSubtotalRows.push(rows.length);
-    rows.push(["入库小计", "", "", "", inQty, inAmount]);
-    totalInboundQty += inQty;
-    totalInboundAmount += inAmount;
-
-    const skuReturnRows = returnDetails.value.filter((row) => row.sku === sku.sku);
     let rQty = 0;
     let rAmount = 0;
-    if (skuReturnRows.length) {
-      labelRows.push(rows.length);
-      rows.push(["退货"]);
-      headerRows.push(rows.length);
-      rows.push(["时间", "名称", "重量/斤", "克重/g", "退货数量", "金额", "退货原因"]);
-      for (const row of skuReturnRows) {
-        rows.push([row.date, row.name, row.weightJin, row.unitWeightG, row.qty, row.amount, row.reason || ""]);
+    for (let i = 0; i < dataRowCount; i++) {
+      const r = newRow();
+      if (i < inboundRows.length) {
+        const row = inboundRows[i];
+        setCell(r, COL.inStart, row.date);
+        setCell(r, COL.inStart + 1, row.weightJin);
+        setCell(r, COL.inStart + 2, row.unitWeightG);
+        setCell(r, COL.inStart + 3, row.qty);
+        setCell(r, COL.inStart + 4, row.amount);
+        inQty += row.qty;
+        inAmount += row.amount;
+      }
+      if (hasReturn && i < skuReturnRows.length) {
+        const row = skuReturnRows[i];
+        setCell(r, COL.retStart, row.date);
+        setCell(r, COL.retStart + 1, row.weightJin);
+        setCell(r, COL.retStart + 2, row.unitWeightG);
+        setCell(r, COL.retStart + 3, row.qty);
+        setCell(r, COL.retStart + 4, row.amount);
         rQty += row.qty;
         rAmount += row.amount;
       }
-      // 退货表头是 时间/名称/重量/克重/退货数量/金额/退货原因，同理数量金额对齐 E/F 列
-      returnSubtotalRows.push(rows.length);
-      rows.push(["退货小计", "", "", "", rQty, rAmount]);
     }
 
+    const totalRow = newRow();
+    setCell(totalRow, COL.inStart, "总计");
+    setCell(totalRow, COL.inStart + 3, inQty);
+    setCell(totalRow, COL.inStart + 4, inAmount);
+    styleRange(totalRow, COL.inStart, COL.inEnd, INBOUND_TOTAL_STYLE);
+    if (hasReturn) {
+      setCell(totalRow, COL.retStart, "总计");
+      setCell(totalRow, COL.retStart + 3, rQty);
+      setCell(totalRow, COL.retStart + 4, rAmount);
+      styleRange(totalRow, COL.retStart, COL.retEnd, RETURN_TOTAL_STYLE);
+    }
+
+    // 产品名称：竖向合并，跨从标题栏到总计行的整个高度
+    setCell(titleRow, COL.title, `${sku.sku} · ${sku.name}`);
+    merges.push({ s: { r: titleRow, c: COL.title }, e: { r: totalRow, c: COL.title } });
+    for (let r = titleRow; r <= totalRow; r++) styleCmds.push({ r, c: COL.title, style: TITLE_STYLE });
+
+    totalInboundQty += inQty;
+    totalInboundAmount += inAmount;
     perSkuTotals.push({ sku: sku.sku, name: sku.name, inQty, inAmount, rQty, rAmount });
   }
 
   // 全部产品汇总：先按产品列一遍各自入库/退货多少，再是三行总计
-  rows.push([]);
-  titleRows.push(rows.length);
-  rows.push(["全部产品汇总"]);
-  headerRows.push(rows.length);
-  rows.push(["货号", "名称", "入库数量", "入库金额", "退货数量", "退货金额"]);
-  for (const t of perSkuTotals) {
-    rows.push([t.sku, t.name, t.inQty, t.inAmount, t.rQty, t.rAmount]);
-  }
-  // 上面这张按产品列的表，表头是 货号/名称/入库数量/入库金额/退货数量/退货金额——
-  // "入库合计"对应 C/D 列，"退货合计"对应 E/F 列，两者含义不一样、不能都摆在 C/D。
-  // "净应收合计"两个都不是（是入库和退货抵完之后的净数），用"数量/金额"文字自己标出来，
-  // 不依赖上面表头哪一列，看着才不会以为它是"入库数量"或"退货数量"
-  inboundSubtotalRows.push(rows.length);
-  rows.push(["入库合计", "", totalInboundQty, totalInboundAmount]);
-  returnSubtotalRows.push(rows.length);
-  rows.push(["退货合计", "", "", "", s.returnQty, s.returnAmount]);
-  netTotalRows.push(rows.length);
-  rows.push(["净应收合计", "", "数量", s.totalQty, "金额", s.totalAmount]);
+  newRow();
+  const grandTitleRow = newRow();
+  setCell(grandTitleRow, 0, "全部产品汇总");
+  merges.push({ s: { r: grandTitleRow, c: 0 }, e: { r: grandTitleRow, c: TOTAL_COLS - 1 } });
+  styleRange(grandTitleRow, 0, TOTAL_COLS - 1, TITLE_STYLE);
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws["!merges"] = titleRows.map((r) => ({ s: { r, c: 0 }, e: { r, c: COLS - 1 } }));
-  for (const r of titleRows) {
-    for (let c = 0; c < COLS; c++) {
-      const ref = XLSX.utils.encode_cell({ r, c });
-      if (!ws[ref]) ws[ref] = { t: "s", v: "" };
-      ws[ref].s = TITLE_STYLE;
-    }
+  const grandHeaderRow = newRow();
+  ["货号", "名称", "入库数量", "入库金额", "退货数量", "退货金额"].forEach((h, i) => setCell(grandHeaderRow, i, h));
+  styleRange(grandHeaderRow, 0, 5, SUB_HEADER_STYLE);
+  for (const t of perSkuTotals) {
+    const r = newRow();
+    [t.sku, t.name, t.inQty, t.inAmount, t.rQty, t.rAmount].forEach((v, i) => setCell(r, i, v));
   }
-  for (const r of [...headerRows, ...labelRows]) {
-    for (let c = 0; c < Math.max(rows[r].length, 1); c++) {
-      const ref = XLSX.utils.encode_cell({ r, c });
-      if (ws[ref]) ws[ref].s = HEADER_STYLE;
-    }
+
+  // "入库合计"对应 C/D 列，"退货合计"对应 E/F 列——跟上面表头的"入库数量/入库金额/
+  // 退货数量/退货金额"对齐；"净应收合计"两个都不是，用"数量/金额"文字自己标出来
+  const inboundTotalRow = newRow();
+  setCell(inboundTotalRow, 0, "入库合计");
+  setCell(inboundTotalRow, 2, totalInboundQty);
+  setCell(inboundTotalRow, 3, totalInboundAmount);
+  styleRange(inboundTotalRow, 0, 5, INBOUND_TOTAL_STYLE);
+
+  const returnTotalRow = newRow();
+  setCell(returnTotalRow, 0, "退货合计");
+  setCell(returnTotalRow, 4, s.returnQty);
+  setCell(returnTotalRow, 5, s.returnAmount);
+  styleRange(returnTotalRow, 0, 5, RETURN_TOTAL_STYLE);
+
+  const netTotalRow = newRow();
+  setCell(netTotalRow, 0, "净应收合计");
+  setCell(netTotalRow, 2, "数量");
+  setCell(netTotalRow, 3, s.totalQty);
+  setCell(netTotalRow, 4, "金额");
+  setCell(netTotalRow, 5, s.totalAmount);
+  styleRange(netTotalRow, 0, 5, NET_TOTAL_STYLE);
+
+  const ws = XLSX.utils.aoa_to_sheet(grid);
+  ws["!merges"] = merges;
+  ws["!cols"] = [
+    { wch: 16 }, // 产品名称
+    { wch: 11 }, { wch: 9 }, { wch: 9 }, { wch: 10 }, { wch: 10 }, // 入库五列
+    { wch: 3 }, // 空隔列
+    { wch: 11 }, { wch: 9 }, { wch: 9 }, { wch: 10 }, { wch: 10 }, // 退货五列
+  ];
+  for (const { r, c, style } of styleCmds) {
+    const ref = XLSX.utils.encode_cell({ r, c });
+    if (!ws[ref]) ws[ref] = { t: "s", v: "" };
+    ws[ref].s = style;
   }
-  const styleRows = (rowNumbers: number[], style: CellStyle) => {
-    for (const r of rowNumbers) {
-      for (let c = 0; c < 6; c++) {
-        const ref = XLSX.utils.encode_cell({ r, c });
-        if (!ws[ref]) ws[ref] = { t: "s", v: "" };
-        ws[ref].s = style;
-      }
-    }
-  };
-  styleRows(inboundSubtotalRows, INBOUND_SUBTOTAL_STYLE);
-  styleRows(returnSubtotalRows, RETURN_SUBTOTAL_STYLE);
-  styleRows(netTotalRows, NET_TOTAL_STYLE);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "汇总");
