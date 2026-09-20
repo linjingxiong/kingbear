@@ -130,7 +130,7 @@ export class PartyService {
     return rows.sort((a, b) => b.date.localeCompare(a.date) || a.key.localeCompare(b.key));
   }
 
-  /* ---------- 玩具厂：入库单（发出）+ 出库单的发料/退货（收进） ---------- */
+  /* ---------- 玩具厂：入库单（入库，货流进玩具厂）+ 出库单的发料/退货（出库，货流出玩具厂） ---------- */
   private async toyFactoryRows(id: string, yearMonth?: string): Promise<PartyLedgerRow[]> {
     const range = monthRange(yearMonth);
     const [inbounds, outbounds] = await Promise.all([
@@ -149,7 +149,7 @@ export class PartyService {
           source: 'inbound',
           sourceId: String(r._id),
           date: r.inboundDate.toISOString(),
-          direction: 'out',
+          direction: 'in',
           typeLabel: '入库单',
           itemKind: 'product',
           itemKey: item.sku,
@@ -172,7 +172,7 @@ export class PartyService {
         source: isIssue ? 'outbound_issue' : 'outbound_return',
         sourceId: String(r._id),
         date: r.returnDate.toISOString(),
-        direction: 'in',
+        direction: 'out',
         typeLabel: isIssue ? '出库单·发料' : '出库单·退货',
         itemKind: 'product',
         itemKey: r.sku,
@@ -189,7 +189,7 @@ export class PartyService {
     return rows;
   }
 
-  /* ---------- 代工厂：物料发放（发出）+ 成品回收、通用物料回收（收进） ---------- */
+  /* ---------- 代工厂：物料发放（入库，料流进代工厂）+ 成品回收、通用物料回收（出库，货流出代工厂） ---------- */
   private async oemFactoryRows(id: string, yearMonth?: string): Promise<PartyLedgerRow[]> {
     const range = monthRange(yearMonth);
     const [issuances, receipts, commonReturns] = await Promise.all([
@@ -222,7 +222,7 @@ export class PartyService {
         source: 'material_issuance',
         sourceId: String(r._id),
         date: r.issuedDate.toISOString(),
-        direction: 'out',
+        direction: 'in',
         typeLabel: gid ? '物料发放' : '通用物料发放',
         itemKind: 'material',
         itemKey: r.materialName,
@@ -240,7 +240,7 @@ export class PartyService {
         source: 'oem_receipt',
         sourceId: String(r._id),
         date: r.receivedDate.toISOString(),
-        direction: 'in',
+        direction: 'out',
         typeLabel: '成品回收',
         itemKind: 'product',
         itemKey: p?.sku ?? '未知货号',
@@ -259,7 +259,7 @@ export class PartyService {
         source: 'common_material_return',
         sourceId: String(r._id),
         date: r.returnedDate.toISOString(),
-        direction: 'in',
+        direction: 'out',
         typeLabel: '通用物料回收',
         itemKind: 'material',
         itemKey: r.commonMaterialName,

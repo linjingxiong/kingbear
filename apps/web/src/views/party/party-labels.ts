@@ -5,10 +5,10 @@ export const PARTY_ROLE_LABEL: Record<PartyRole, string> = {
   oem_factory: "代工厂",
 };
 
-/** 方向统一按"相对于我"：收进=货到了我手里，发出=货离开了我手里 */
+/** 方向统一按"这个单位"：入库=货流进这个单位，出库=货从这个单位流出 */
 export const DIRECTION_LABEL: Record<LedgerDirection, string> = {
-  in: "收进",
-  out: "发出",
+  in: "入库",
+  out: "出库",
 };
 
 /** 每种流水的原单据在哪个页面处理——详情里点"去处理"跳过去 */

@@ -57,10 +57,10 @@ onMounted(load);
       </el-table-column>
       <el-table-column prop="contact" label="联系人" width="120" />
       <el-table-column prop="phone" label="电话" width="140" />
-      <el-table-column label="收进" width="90" align="right">
+      <el-table-column label="入库" width="90" align="right">
         <template #default="{ row }">{{ row.inCount }} 笔</template>
       </el-table-column>
-      <el-table-column label="发出" width="90" align="right">
+      <el-table-column label="出库" width="90" align="right">
         <template #default="{ row }">{{ row.outCount }} 笔</template>
       </el-table-column>
       <el-table-column label="最近往来" width="130">

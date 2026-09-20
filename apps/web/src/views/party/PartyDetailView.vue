@@ -7,7 +7,7 @@ import { getParty, getPartyLedger } from "../../api/party";
 import { DIRECTION_LABEL, PARTY_ROLE_LABEL, sourceRoute } from "./party-labels";
 
 // 往来单位详情：同一套页面看任何一个单位（玩具厂/代工厂）。数据是后端把各种单据实时转成的
-// 统一流水（见 party.service.ts），方向统一按"相对于我"：收进=货到我手里，发出=货离开我手里；
+// 统一流水（见 party.service.ts），方向统一按"这个单位"：入库=货流进这个单位，出库=货从这个单位流出；
 // 原来的单据名（入库单/出库单·发料/物料发放/成品回收…）保留在"类型"列里
 const route = useRoute();
 const router = useRouter();
@@ -60,7 +60,7 @@ const filteredRows = computed(() =>
 const inCount = computed(() => filteredRows.value.filter((r) => r.direction === "in").length);
 const outCount = computed(() => filteredRows.value.filter((r) => r.direction === "out").length);
 
-/** 按货号/物料汇总：每个货号或物料，收进多少、发出多少（只汇总不做差额——不同单据的计量口径
+/** 按货号/物料汇总：每个货号或物料，入库多少、出库多少（只汇总不做差额——不同单据的计量口径
  * 不一样，"结余"怎么算还没定，先把两边各自的总数摆出来） */
 const summaryRows = computed(() => {
   const map = new Map<string, { kind: string; key: string; name: string; inQty: number; outQty: number }>();
@@ -125,8 +125,8 @@ onMounted(load);
         </div>
       </div>
       <div class="stat-row">
-        <div class="stat"><span class="stat-label">收进（货到我手里）</span><strong>{{ inCount }}</strong> 笔</div>
-        <div class="stat"><span class="stat-label">发出（货离开我手里）</span><strong>{{ outCount }}</strong> 笔</div>
+        <div class="stat"><span class="stat-label">入库（货流进这个单位）</span><strong>{{ inCount }}</strong> 笔</div>
+        <div class="stat"><span class="stat-label">出库（货从这个单位流出）</span><strong>{{ outCount }}</strong> 笔</div>
       </div>
     </el-card>
 
@@ -137,8 +137,8 @@ onMounted(load);
         </el-select>
         <el-radio-group v-model="directionFilter">
           <el-radio-button value="">全部</el-radio-button>
-          <el-radio-button value="in">收进</el-radio-button>
-          <el-radio-button value="out">发出</el-radio-button>
+          <el-radio-button value="in">入库</el-radio-button>
+          <el-radio-button value="out">出库</el-radio-button>
         </el-radio-group>
         <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 160px">
           <el-option v-for="t in typeOptions" :key="t" :label="t" :value="t" />
@@ -209,14 +209,14 @@ onMounted(load);
             <el-table-column prop="kind" label="类别" width="90" />
             <el-table-column prop="key" label="货号 / 物料" width="180" />
             <el-table-column prop="name" label="名称" min-width="160" show-overflow-tooltip />
-            <el-table-column label="收进数量" width="130" align="right">
+            <el-table-column label="入库数量" width="130" align="right">
               <template #default="{ row }">{{ row.inQty ? row.inQty.toLocaleString() : "-" }}</template>
             </el-table-column>
-            <el-table-column label="发出数量" width="130" align="right">
+            <el-table-column label="出库数量" width="130" align="right">
               <template #default="{ row }">{{ row.outQty ? row.outQty.toLocaleString() : "-" }}</template>
             </el-table-column>
           </el-table>
-          <div class="tip">收进、发出各自的总数，不做相减——不同单据的计量口径不一样，结余怎么算还没定。</div>
+          <div class="tip">入库、出库各自的总数，不做相减——不同单据的计量口径不一样，结余怎么算还没定。</div>
           <el-empty v-if="!loading && !summaryRows.length" description="没有符合条件的流水" />
         </el-tab-pane>
 

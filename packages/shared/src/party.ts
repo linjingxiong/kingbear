@@ -6,18 +6,19 @@
  */
 export type PartyRole = "toy_factory" | "oem_factory";
 
-/** 流水方向统一按"相对于我"来说：in=收进（货到了我手里），out=发出（货离开了我手里）。
- * 玩具厂那边的单据名（入库单/出库单）是它自己的视角，代工厂那边（物料发放/成品回收）是我的视角，
- * 两边叫法方向是反的，所以统一之后只用收进/发出，原来的单据名放在 typeLabel 里当标签。 */
+/** 流水方向统一按"这个往来单位"来说：in=入库（货流进了这个单位），out=出库（货从这个单位流出）。
+ * 玩具厂自己的单据名（入库单/出库单）本来就是这个视角；代工厂那边我平时叫的物料发放/成品回收
+ * 是我自己的视角，统一之后也换成以代工厂为准——发给它的料是流进它、它交回来的货是流出它，
+ * 原来的单据名保留在 typeLabel 里当标签。 */
 export type LedgerDirection = "in" | "out";
 
 export type LedgerSource =
-  | "inbound" // 玩具厂入库单：我交货给玩具厂 → 发出
-  | "outbound_issue" // 玩具厂出库单·发料：玩具厂发原料/半成品给我 → 收进
-  | "outbound_return" // 玩具厂出库单·退货：不合格的货退回给我 → 收进
-  | "material_issuance" // 代工厂物料发放：我发物料给代工厂 → 发出
-  | "oem_receipt" // 代工厂成品回收：代工厂交回成品/半成品 → 收进
-  | "common_material_return"; // 代工厂通用物料回收（框等）→ 收进
+  | "inbound" // 玩具厂入库单：我交的货流进玩具厂 → 入库
+  | "outbound_issue" // 玩具厂出库单·发料：玩具厂发原料/半成品给我 → 出库
+  | "outbound_return" // 玩具厂出库单·退货：不合格的货退回给我 → 出库
+  | "material_issuance" // 代工厂物料发放：我发的物料流进代工厂 → 入库
+  | "oem_receipt" // 代工厂成品回收：代工厂交回成品/半成品，流出代工厂 → 出库
+  | "common_material_return"; // 代工厂通用物料回收（框等），流出代工厂 → 出库
 
 export interface PartyBase {
   id: string;
