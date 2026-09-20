@@ -9,6 +9,7 @@ import {
   type PartyRole,
 } from '@kingbear/shared';
 import { Factory } from '../factory/schemas/factory.schema';
+import { FactoryService } from '../factory/factory.service';
 import { OemFactory } from '../oem-factory/schemas/oem-factory.schema';
 import { InboundRecord } from '../inbound/schemas/inbound-record.schema';
 import { InboundReturn } from '../inbound-return/schemas/inbound-return.schema';
@@ -60,15 +61,19 @@ export class PartyService {
     @InjectModel(CommonMaterialReturn.name) private readonly commonReturnModel: Model<CommonMaterialReturn>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
     @InjectModel(ProductGroup.name) private readonly groupModel: Model<ProductGroup>,
+    private readonly factoryService: FactoryService,
   ) {}
 
   /** 玩具厂 + 代工厂放在一个列表里，每个带上流水概况；流水条数不多（单用户内部工具），
    * 直接逐个单位把流水算出来数一下，比另写一套聚合更不容易跟详情页的口径对不上 */
   async list(): Promise<PartyListItem[]> {
-    const [factories, oemFactories] = await Promise.all([
+    const [factories, oemFactories, factoryStats] = await Promise.all([
       this.factoryModel.find().sort({ createdAt: 1 }).lean(),
       this.oemFactoryModel.find().sort({ createdAt: 1 }).lean(),
+      this.factoryService.findAll(),
     ]);
+    const statsById = new Map<string, { productCount: number; processedAmount: number }>();
+    for (const s of factoryStats) statsById.set(s.id, { productCount: s.productCount, processedAmount: s.processedAmount });
     const bases: PartyBase[] = [
       ...factories.map((f) => ({
         id: String(f._id),
@@ -95,6 +100,7 @@ export class PartyService {
         const rows = await this.ledger(base.role, base.id);
         return {
           ...base,
+          ...(base.role === 'toy_factory' ? statsById.get(base.id) : {}),
           recordCount: rows.length,
           inCount: rows.filter((r) => r.direction === 'in').length,
           outCount: rows.filter((r) => r.direction === 'out').length,
@@ -136,6 +142,39 @@ export class PartyService {
       address: doc.address,
       remark: doc.remark,
     };
+  }
+
+  /**
+   * 删除一个往来单位。原来玩具厂/代工厂各自的删除接口是直接删，名下有产品、单据也照删，
+   * 会留下一堆没主的数据——数据最重要，所以合并页面之后删除统一走这里：名下只要还有任何
+   * 产品/单据就拒绝，并告诉用户具体是什么、有几条；一条都没有才真的删。
+   */
+  async remove(role: PartyRole, id: string): Promise<{ success: boolean }> {
+    if (role === 'me') throw new BadRequestException('"我"是固定的中间环节，不能删除');
+    await this.detail(role, id); // 不存在就 404，id 不合法就 400
+
+    const refs: Array<[string, Promise<number>]> =
+      role === 'toy_factory'
+        ? [
+            ['产品', this.groupModel.countDocuments({ factoryId: idIn(id) } as never)],
+            ['工序', this.productModel.countDocuments({ factoryId: idIn(id) } as never)],
+            ['入库单', this.inboundModel.countDocuments({ factoryId: idIn(id) } as never)],
+            ['出库单', this.outboundModel.countDocuments({ factoryId: idIn(id) } as never)],
+          ]
+        : [
+            ['物料发放', this.issuanceModel.countDocuments({ oemFactoryId: idIn(id) } as never)],
+            ['成品回收', this.receiptModel.countDocuments({ oemFactoryId: idIn(id) } as never)],
+            ['通用物料回收', this.commonReturnModel.countDocuments({ oemFactoryId: idIn(id) } as never)],
+          ];
+    const counts = await Promise.all(refs.map(async ([label, p]) => [label, await p] as const));
+    const used = counts.filter(([, n]) => n > 0).map(([label, n]) => `${n} 条${label}`);
+    if (used.length) {
+      throw new BadRequestException(`不能删除：这个${role === 'toy_factory' ? '玩具厂' : '代工厂'}名下还有 ${used.join('、')}，先处理掉这些数据再删`);
+    }
+
+    if (role === 'toy_factory') await this.factoryModel.findByIdAndDelete(id);
+    else await this.oemFactoryModel.findByIdAndDelete(id);
+    return { success: true };
   }
 
   /** 这个单位的全部流水，按日期倒序（同一天按来源/单号稳定排序）。yearMonth 不传就是所有时间 */

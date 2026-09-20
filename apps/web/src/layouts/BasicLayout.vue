@@ -16,13 +16,12 @@ const sidebarOpen = ref(false);
 
 const menuItems = [
   { title: "首页", icon: "HomeFilled", children: [{ path: "/dashboard", title: "首页 Dashboard", icon: "Odometer" }] },
-  // 往来单位：玩具厂、代工厂（以后还有工人/加工代理）统一的入口，点进去看每个单位的全部出入库
+  // 往来单位：玩具厂、代工厂（以后还有工人/加工代理）统一的入口——新增/编辑/删除和查看全部出入库都在这里
   { title: "往来单位", icon: "Connection", children: [{ path: "/party", title: "往来单位", icon: "Connection" }] },
   {
     title: "基础资料",
     icon: "Notebook",
     children: [
-      { path: "/factory", title: "玩具厂管理", icon: "Shop" },
       { path: "/product", title: "产品管理", icon: "Box" },
     ],
   },
@@ -41,7 +40,6 @@ const menuItems = [
     title: "代工厂管理",
     icon: "OfficeBuilding",
     children: [
-      { path: "/oem-factory", title: "代工厂管理", icon: "OfficeBuilding" },
       { path: "/common-material", title: "通用物料", icon: "Goods" },
       // 物料发放/成品回收/通用物料回收/物料对账，都是围绕"代工厂物料收发"这一件事，
       // 合并成一个页面用 tab 切换（见 MaterialFlowHubView），原来4个菜单项合成这1个

@@ -48,6 +48,9 @@ export interface PartyListItem extends PartyBase {
   outCount: number;
   /** 最近一次往来的日期（ISO），没有任何流水时为 null */
   lastDate: string | null;
+  /** 只有玩具厂有：名下产品数量、累计加工金额（跟应收账单同一个口径） */
+  productCount?: number;
+  processedAmount?: number;
 }
 
 /** 统一的流水行——一行 = 一个货号或一种物料的一次出入库 */

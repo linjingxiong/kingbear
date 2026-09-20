@@ -19,12 +19,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import("../views/dashboard/DashboardView.vue"),
         meta: { title: "首页" },
       },
-      {
-        path: "factory",
-        name: "factory",
-        component: () => import("../views/factory/FactoryListView.vue"),
-        meta: { title: "玩具厂管理" },
-      },
+      // 玩具厂管理/代工厂管理已经合并进往来单位；老路径留着跳转，旧书签和已打开的标签页不会白屏
+      { path: "factory", redirect: "/party" },
       {
         path: "product",
         name: "product",
@@ -55,12 +51,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import("../views/asset/AssetListView.vue"),
         meta: { title: "资产盘点" },
       },
-      {
-        path: "oem-factory",
-        name: "oem-factory",
-        component: () => import("../views/oem-factory/OemFactoryListView.vue"),
-        meta: { title: "代工厂管理" },
-      },
+      { path: "oem-factory", redirect: "/party" },
       {
         path: "common-material",
         name: "common-material",
