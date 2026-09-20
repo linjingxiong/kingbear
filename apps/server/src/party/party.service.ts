@@ -103,13 +103,13 @@ export class PartyService {
       }),
     );
 
-    // "我"是中间环节：每个对象的入库=我发出去、对象的出库=我收进来，数字直接由上面各单位倒过来加总，
+    // "我"是中间环节：每个对象的入库=货从我手里出库、对象的出库=货到我手里入库，数字直接由上面各单位倒过来加总，
     // 不用再把全部流水算第二遍
     const me: PartyListItem = {
       id: 'me',
       role: 'me',
       name: '我（中间环节）',
-      remark: '玩具厂和代工厂/工人之间的中转：所有货从我这里收进、发出',
+      remark: '玩具厂和代工厂/工人之间的中转：所有货从我这里入库、出库',
       recordCount: items.reduce((n, p) => n + p.recordCount, 0),
       inCount: items.reduce((n, p) => n + p.outCount, 0),
       outCount: items.reduce((n, p) => n + p.inCount, 0),
@@ -149,7 +149,7 @@ export class PartyService {
 
   /**
    * "我"的总账：我在玩具厂和代工厂/工人之间，货都从我这里过。把所有对象各自的流水合起来，
-   * 方向整体反过来（对象的"入库"= 货流进对象 = 从我手里发出去；对象的"出库"= 我收进来），
+   * 方向整体反过来（对象的"入库"= 货流进对象 = 从我手里出库；对象的"出库"= 货到我手里 = 我入库），
    * 并标上每一笔的对方是谁。同一笔单据在对象那边和在我这边是同一条数据的两个视角，不会重复入库。
    */
   private async meLedger(yearMonth?: string): Promise<PartyLedgerRow[]> {
