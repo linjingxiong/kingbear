@@ -16,6 +16,8 @@ const sidebarOpen = ref(false);
 
 const menuItems = [
   { title: "首页", icon: "HomeFilled", children: [{ path: "/dashboard", title: "首页 Dashboard", icon: "Odometer" }] },
+  // 往来单位：玩具厂、代工厂（以后还有工人/加工代理）统一的入口，点进去看每个单位的全部出入库
+  { title: "往来单位", icon: "Connection", children: [{ path: "/party", title: "往来单位", icon: "Connection" }] },
   {
     title: "基础资料",
     icon: "Notebook",

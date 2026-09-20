@@ -4,6 +4,7 @@ export * from "./product";
 export * from "./product-group";
 export * from "./inbound";
 export * from "./inbound-return";
+export * from "./party";
 export * from "./billing";
 export * from "./dashboard";
 export * from "./quantity";

@@ -73,6 +73,19 @@ const routes: RouteRecordRaw[] = [
         component: () => import("../views/material-flow/MaterialFlowHubView.vue"),
         meta: { title: "物料流转" },
       },
+      {
+        path: "party",
+        name: "party",
+        component: () => import("../views/party/PartyListView.vue"),
+        meta: { title: "往来单位" },
+      },
+      {
+        // role = toy_factory | oem_factory，见 packages/shared/src/party.ts
+        path: "party/:role/:id",
+        name: "party-detail",
+        component: () => import("../views/party/PartyDetailView.vue"),
+        meta: { title: "往来单位详情" },
+      },
     ],
   },
 ];

@@ -21,6 +21,7 @@ import { CommonMaterialReturnModule } from './common-material-return/common-mate
 import { MaterialIssuanceModule } from './material-issuance/material-issuance.module';
 import { OemReceiptModule } from './oem-receipt/oem-receipt.module';
 import { OemReconciliationModule } from './oem-reconciliation/oem-reconciliation.module';
+import { PartyModule } from './party/party.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { OemReconciliationModule } from './oem-reconciliation/oem-reconciliation
     MaterialIssuanceModule,
     OemReceiptModule,
     OemReconciliationModule,
+    PartyModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
 })
