@@ -18,7 +18,7 @@ import { CommonMaterialReturn } from '../common-material-return/schemas/common-m
 import { Product } from '../product/schemas/product.schema';
 import { ProductGroup } from '../product-group/schemas/product-group.schema';
 
-const ROLES: PartyRole[] = ['toy_factory', 'oem_factory'];
+const ROLES: PartyRole[] = ['toy_factory', 'oem_factory', 'me'];
 
 export function assertRole(role: string): PartyRole {
   if (!ROLES.includes(role as PartyRole)) throw new BadRequestException('未知的往来单位类型');
@@ -90,7 +90,7 @@ export class PartyService {
       })),
     ];
 
-    return Promise.all(
+    const items: PartyListItem[] = await Promise.all(
       bases.map(async (base) => {
         const rows = await this.ledger(base.role, base.id);
         return {
@@ -102,9 +102,25 @@ export class PartyService {
         };
       }),
     );
+
+    // "我"是中间环节：每个对象的入库=我发出去、对象的出库=我收进来，数字直接由上面各单位倒过来加总，
+    // 不用再把全部流水算第二遍
+    const me: PartyListItem = {
+      id: 'me',
+      role: 'me',
+      name: '我（中间环节）',
+      remark: '玩具厂和代工厂/工人之间的中转：所有货从我这里收进、发出',
+      recordCount: items.reduce((n, p) => n + p.recordCount, 0),
+      inCount: items.reduce((n, p) => n + p.outCount, 0),
+      outCount: items.reduce((n, p) => n + p.inCount, 0),
+      lastDate: items.map((p) => p.lastDate).filter((d): d is string => !!d).sort().pop() ?? null,
+    };
+    return [me, ...items];
   }
 
   async detail(role: PartyRole, id: string): Promise<PartyBase> {
+    // "我"不是数据库里的一条记录，是个固定的虚拟节点
+    if (role === 'me') return { id: 'me', role: 'me', name: '我（中间环节）' };
     if (!Types.ObjectId.isValid(id)) throw new BadRequestException('id 格式不对');
     const doc =
       role === 'toy_factory'
@@ -124,10 +140,38 @@ export class PartyService {
 
   /** 这个单位的全部流水，按日期倒序（同一天按来源/单号稳定排序）。yearMonth 不传就是所有时间 */
   async ledger(role: PartyRole, id: string, yearMonth?: string): Promise<PartyLedgerRow[]> {
+    if (role === 'me') return this.meLedger(yearMonth);
     if (!Types.ObjectId.isValid(id)) throw new BadRequestException('id 格式不对');
     const rows =
       role === 'toy_factory' ? await this.toyFactoryRows(id, yearMonth) : await this.oemFactoryRows(id, yearMonth);
     return rows.sort((a, b) => b.date.localeCompare(a.date) || a.key.localeCompare(b.key));
+  }
+
+  /**
+   * "我"的总账：我在玩具厂和代工厂/工人之间，货都从我这里过。把所有对象各自的流水合起来，
+   * 方向整体反过来（对象的"入库"= 货流进对象 = 从我手里发出去；对象的"出库"= 我收进来），
+   * 并标上每一笔的对方是谁。同一笔单据在对象那边和在我这边是同一条数据的两个视角，不会重复入库。
+   */
+  private async meLedger(yearMonth?: string): Promise<PartyLedgerRow[]> {
+    const [factories, oemFactories] = await Promise.all([this.factoryModel.find().lean(), this.oemFactoryModel.find().lean()]);
+    const targets = [
+      ...factories.map((f) => ({ id: String(f._id), role: 'toy_factory' as const, name: f.name })),
+      ...oemFactories.map((f) => ({ id: String(f._id), role: 'oem_factory' as const, name: f.name })),
+    ];
+    const perParty = await Promise.all(
+      targets.map(async (t) =>
+        (await this.ledger(t.role, t.id, yearMonth)).map(
+          (r): PartyLedgerRow => ({
+            ...r,
+            direction: r.direction === 'in' ? 'out' : 'in',
+            partyId: t.id,
+            partyName: t.name,
+            partyRole: t.role,
+          }),
+        ),
+      ),
+    );
+    return perParty.flat().sort((a, b) => b.date.localeCompare(a.date) || a.key.localeCompare(b.key));
   }
 
   /* ---------- 玩具厂：入库单（入库，货流进玩具厂）+ 出库单的发料/退货（出库，货流出玩具厂） ---------- */

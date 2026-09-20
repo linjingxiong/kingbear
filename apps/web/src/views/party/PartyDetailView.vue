@@ -4,15 +4,22 @@ import { useRoute, useRouter } from "vue-router";
 import dayjs from "dayjs";
 import type { LedgerDirection, PartyBase, PartyLedgerRow, PartyRole } from "@kingbear/shared";
 import { getParty, getPartyLedger } from "../../api/party";
-import { DIRECTION_LABEL, PARTY_ROLE_LABEL, sourceRoute } from "./party-labels";
+import { PARTY_ROLE_LABEL, directionLabel, sourceRoute } from "./party-labels";
 
 // 往来单位详情：同一套页面看任何一个单位（玩具厂/代工厂）。数据是后端把各种单据实时转成的
 // 统一流水（见 party.service.ts），方向统一按"这个单位"：入库=货流进这个单位，出库=货从这个单位流出；
-// 原来的单据名（入库单/出库单·发料/物料发放/成品回收…）保留在"类型"列里
+// 原来的单据名（入库单/出库单·发料/物料发放/成品回收…）保留在"类型"列里。
+// 看"我"（中间环节）时是总账：所有单位的流水合在一起、方向反过来叫收进/发出，并多一列"对方"
 const route = useRoute();
 const router = useRouter();
 const role = computed(() => route.params.role as PartyRole);
 const id = computed(() => route.params.id as string);
+const isMe = computed(() => role.value === "me");
+const inLabel = computed(() => directionLabel(role.value, "in"));
+const outLabel = computed(() => directionLabel(role.value, "out"));
+const roleTagType = computed(() =>
+  party.value?.role === "toy_factory" ? "warning" : party.value?.role === "oem_factory" ? "success" : "primary",
+);
 
 const party = ref<PartyBase | null>(null);
 const rows = ref<PartyLedgerRow[]>([]);
@@ -106,7 +113,7 @@ onMounted(load);
           <el-button link type="primary" @click="router.push('/party')">← 返回往来单位</el-button>
           <div class="head-title">
             <h2>{{ party.name }}</h2>
-            <el-tag :type="party.role === 'toy_factory' ? 'warning' : 'success'" effect="plain">
+            <el-tag :type="roleTagType" effect="plain">
               {{ PARTY_ROLE_LABEL[party.role] }}
             </el-tag>
           </div>
@@ -125,8 +132,14 @@ onMounted(load);
         </div>
       </div>
       <div class="stat-row">
-        <div class="stat"><span class="stat-label">入库（货流进这个单位）</span><strong>{{ inCount }}</strong> 笔</div>
-        <div class="stat"><span class="stat-label">出库（货从这个单位流出）</span><strong>{{ outCount }}</strong> 笔</div>
+        <div class="stat">
+          <span class="stat-label">{{ inLabel }}（{{ isMe ? "货到了我手里" : "货流进这个单位" }}）</span>
+          <strong>{{ inCount }}</strong> 笔
+        </div>
+        <div class="stat">
+          <span class="stat-label">{{ outLabel }}（{{ isMe ? "货离开了我手里" : "货从这个单位流出" }}）</span>
+          <strong>{{ outCount }}</strong> 笔
+        </div>
       </div>
     </el-card>
 
@@ -137,8 +150,8 @@ onMounted(load);
         </el-select>
         <el-radio-group v-model="directionFilter">
           <el-radio-button value="">全部</el-radio-button>
-          <el-radio-button value="in">入库</el-radio-button>
-          <el-radio-button value="out">出库</el-radio-button>
+          <el-radio-button value="in">{{ inLabel }}</el-radio-button>
+          <el-radio-button value="out">{{ outLabel }}</el-radio-button>
         </el-radio-group>
         <el-select v-model="typeFilter" placeholder="全部类型" clearable style="width: 160px">
           <el-option v-for="t in typeOptions" :key="t" :label="t" :value="t" />
@@ -154,8 +167,16 @@ onMounted(load);
             <el-table-column label="方向" width="80" align="center">
               <template #default="{ row }">
                 <el-tag :type="row.direction === 'in' ? 'success' : 'primary'" size="small" effect="plain">
-                  {{ DIRECTION_LABEL[row.direction as LedgerDirection] }}
+                  {{ directionLabel(role, row.direction as LedgerDirection) }}
                 </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="isMe" label="对方" width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-tag :type="row.partyRole === 'toy_factory' ? 'warning' : 'success'" effect="plain" size="small">
+                  {{ row.partyRole === "toy_factory" ? "玩具厂" : "代工厂" }}
+                </el-tag>
+                {{ row.partyName }}
               </template>
             </el-table-column>
             <el-table-column label="类型" width="130">
@@ -209,14 +230,16 @@ onMounted(load);
             <el-table-column prop="kind" label="类别" width="90" />
             <el-table-column prop="key" label="货号 / 物料" width="180" />
             <el-table-column prop="name" label="名称" min-width="160" show-overflow-tooltip />
-            <el-table-column label="入库数量" width="130" align="right">
+            <el-table-column :label="`${inLabel}数量`" width="130" align="right">
               <template #default="{ row }">{{ row.inQty ? row.inQty.toLocaleString() : "-" }}</template>
             </el-table-column>
-            <el-table-column label="出库数量" width="130" align="right">
+            <el-table-column :label="`${outLabel}数量`" width="130" align="right">
               <template #default="{ row }">{{ row.outQty ? row.outQty.toLocaleString() : "-" }}</template>
             </el-table-column>
           </el-table>
-          <div class="tip">入库、出库各自的总数，不做相减——不同单据的计量口径不一样，结余怎么算还没定。</div>
+          <div class="tip">
+            {{ inLabel }}、{{ outLabel }}各自的总数，不做相减——不同单据的计量口径不一样，结余怎么算还没定。
+          </div>
           <el-empty v-if="!loading && !summaryRows.length" description="没有符合条件的流水" />
         </el-tab-pane>
 
