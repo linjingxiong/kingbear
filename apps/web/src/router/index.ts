@@ -35,7 +35,7 @@ const routes: RouteRecordRaw[] = [
         path: "inbound",
         name: "inbound",
         component: () => import("../views/inbound/InboundHubView.vue"),
-        meta: { title: "入库管理" },
+        meta: { title: "出入库管理" },
       },
       {
         path: "inbound/:id/confirm",

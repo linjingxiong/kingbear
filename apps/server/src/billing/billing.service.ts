@@ -39,10 +39,13 @@ export class BillingService {
       // 这里查出来跟入库明细放一起对账："入库合计 - 退货合计"。
       // 注意：InboundReturn.factoryId 实际存的是字符串（跟 Product.factoryId 是同一个
       // 历史遗留特点，不是 ObjectId），这里不能像上面 inboundModel 那样包一层
-      // new Types.ObjectId(...)，包了就永远查不出来——之前刚踩过这个坑
+      // new Types.ObjectId(...)，包了就永远查不出来——之前刚踩过这个坑。
+      // 这张表现在也存出库单里的"发料"行（kind=issue），那些不影响应收，要排除掉；
+      // 老记录没有 kind 字段（当时只存退货），所以写 $ne: 'issue' 而不是 kind: 'return'
       this.inboundReturnModel
         .find({
           factoryId,
+          kind: { $ne: 'issue' },
           returnDate: { $gte: start, $lt: end },
         })
         .sort({ returnDate: 1 }),

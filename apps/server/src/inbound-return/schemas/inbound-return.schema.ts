@@ -1,12 +1,19 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
-/** 入库退货：入库确认之后才发现某个货号不合格，退回给玩具厂的一条记录。
- * 不改动原来那条入库单，单独建一条退货记录；账单页对账用"入库合计 - 退货合计"，
- * 见 billing.service.ts。数量模型（weightJin/unitWeightG/qtyDeclared/qty）
+/** 玩具厂出库单的一行明细。最早这张表只存"退货"（入库确认之后发现某个货号不合格、
+ * 玩具厂退回来的一条记录），后来要把出库单整个做进来（发料 + 退货），所以加了 kind 字段
+ * 区分；集合名/类名沿用 inboundReturns/InboundReturn 没改，库里已有的记录不用迁移。
+ * 退货行不改动原来那条入库单，账单页对账用"入库合计 - 退货合计"，见 billing.service.ts；
+ * 发料行只做记录，不进账单。数量模型（weightJin/unitWeightG/qtyDeclared/qty）
  * 跟入库单、成品回收一样，见 packages/shared/src/quantity.ts。 */
 @Schema({ timestamps: true, collection: 'inboundReturns' })
 export class InboundReturn extends Document {
+  /** issue=发料（不影响应收）/ return=退货（从应收里扣）。老记录没有这个字段，
+   * 读的时候要当 "return" 用——查询里别写 kind: 'return'，写 kind: { $ne: 'issue' } */
+  @Prop({ type: String, enum: ['issue', 'return'], default: 'return', index: true })
+  kind: 'issue' | 'return';
+
   @Prop({ type: Types.ObjectId, ref: 'Factory', required: true, index: true })
   factoryId: Types.ObjectId;
 

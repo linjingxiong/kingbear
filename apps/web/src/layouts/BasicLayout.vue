@@ -29,8 +29,8 @@ const menuItems = [
     icon: "Van",
     children: [
       // 入库、入库退货操作流程很像，合并成一个页面用 tab 切换（见 InboundHubView），
-      // 这里只留一个菜单入口，标题还叫"入库管理"，进去之后自己选 tab
-      { path: "/inbound", title: "入库管理", icon: "Van" },
+      // 这里只留一个菜单入口，进去之后自己选 tab（入库 / 出库 / 单据相册）
+      { path: "/inbound", title: "出入库管理", icon: "Van" },
       { path: "/asset", title: "资产盘点", icon: "Suitcase" },
     ],
   },

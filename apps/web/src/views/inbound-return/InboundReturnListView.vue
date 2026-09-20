@@ -1,13 +1,24 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions } from "element-plus";
-import { calculateQuantity, hasBigQuantityDiff, type CreateInboundReturnDto, type FactoryListItem, type InboundReturnListItem, type Product } from "@kingbear/shared";
+import {
+  calculateQuantity,
+  hasBigQuantityDiff,
+  type CreateInboundReturnDto,
+  type FactoryListItem,
+  type InboundReturnListItem,
+  type OutboundKind,
+  type Product,
+} from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { listProductsByFactory } from "../../api/product";
 import { createInboundReturn, deleteInboundReturn, listInboundReturns, recognizeInboundReturn, updateInboundReturn } from "../../api/inbound-return";
 import { useImageZoomPan } from "../../composables/useImageZoomPan";
 
-// 退货单预览图：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互
+// 出库单（玩具厂开的）：一张单里有两种行——"发料"（发原料/半成品给我加工，只做记录）和
+// "退货"（不合格的货退回来，会从应收账单里扣）。这个页面最早只管退货，后来把发料也做进来，
+// 文件名/接口名沿用没改，库里的老记录都是退货（没有 kind 字段的当退货处理）。
+// 出库单预览图：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互
 // （模板里 ref 只有作为顶层 setup 绑定才会自动解包，所以这里解构出来，不要整个对象一起传）
 const {
   zoomLevel: slipZoomLevel,
@@ -24,6 +35,19 @@ const productsByFactory = ref<Product[]>([]);
 const list = ref<InboundReturnListItem[]>([]);
 const loading = ref(false);
 
+const KIND_LABEL: Record<OutboundKind, string> = { issue: "发料", return: "退货" };
+// el-table 插槽里的 row 是 any，直接 KIND_LABEL[row.kind] 过不了类型检查，包一层函数
+function kindLabel(kind: OutboundKind) {
+  return KIND_LABEL[kind];
+}
+// 列表上方的类型筛选：空字符串 = 全部
+const kindFilter = ref<"" | OutboundKind>("");
+const filteredList = computed(() => (kindFilter.value ? list.value.filter((r) => r.kind === kindFilter.value) : list.value));
+
+// 单据上写的是"次品/退货/不合格"这类字眼的行，多半是退货，识别出来时预选"退货"省得一行行手动改；
+// 预选错了行内的类型下拉自己能改，只是个建议，不是自动判定
+const RETURN_HINT = /次品|退货|退回|不良|不合格|返工/;
+
 // 退货货号只能是选中的这个玩具厂自己的产品，换厂要重新拉一遍
 async function loadProducts(factoryId: string) {
   productsByFactory.value = factoryId ? await listProductsByFactory(factoryId) : [];
@@ -38,10 +62,23 @@ async function load() {
   }
 }
 
-/* ---------- 弹窗（一张退货单 = 一个玩具厂 + 多行货号，可批量提交） ----------
+/* ---------- 弹窗（一张出库单 = 一个玩具厂 + 多行货号，可批量提交） ----------
    数量跟入库单一样是"重量(斤) ÷ 单个克重(g)"换算出来的，qtyDeclared 是单据/识别到的数量
    （可编辑，留空就用公式算），qtyFinal() 拿到的才是最终要保存的数量 */
-type RowItem = { productId: string; weightJin: number; unitWeightG: number; qtyDeclared: number | null; reason: string; ocrName: string };
+type RowItem = {
+  kind: OutboundKind;
+  productId: string;
+  weightJin: number;
+  unitWeightG: number;
+  qtyDeclared: number | null;
+  reason: string;
+  ocrName: string;
+};
+
+// 新增一行默认"发料"：出库单里大部分是发料、偶尔夹几行退货，退货的那几行手动改一下
+function blankRow(kind: OutboundKind = "issue"): RowItem {
+  return { kind, productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, reason: "", ocrName: "" };
+}
 
 function qtyCalculated(row: RowItem) {
   return calculateQuantity(row.weightJin, row.unitWeightG);
@@ -71,10 +108,11 @@ const uploading = ref(false);
 
 const rules = {
   factoryId: [{ required: true, message: "请选择玩具厂", trigger: "change" }],
-  returnDate: [{ required: true, message: "请选择退货日期", trigger: "change" }],
+  returnDate: [{ required: true, message: "请选择出库日期", trigger: "change" }],
 };
 
 /* ---------- 草稿：弹窗内容自动存到这台设备的浏览器，防止没录完刷新丢失 ---------- */
+// key 沿用之前"退货草稿"的名字没改：之前存下的没录完的草稿还能恢复出来
 const DRAFT_KEY = "kingbear-inbound-return-draft";
 const draftAvailable = ref(false);
 
@@ -124,10 +162,11 @@ async function restoreDraft() {
       returnDate: d.returnDate ?? "",
       remark: d.remark ?? "",
       imageUrl: d.imageUrl ?? "",
+      // 改版之前存下的草稿没有 kind（那时候只有退货），恢复出来就当退货，别悄悄变成发料
       rows:
         Array.isArray(d.rows) && d.rows.length
-          ? d.rows
-          : [{ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, reason: "", ocrName: "" }],
+          ? d.rows.map((r: Partial<RowItem>) => ({ ...blankRow("return"), ...r, kind: r.kind ?? "return" }))
+          : [blankRow()],
     });
     draftAvailable.value = false;
     dialogVisible.value = true;
@@ -136,7 +175,7 @@ async function restoreDraft() {
   }
 }
 async function discardDraft() {
-  await ElMessageBox.confirm("确定丢弃这张没录完的退货草稿吗？", "确认", { type: "warning" });
+  await ElMessageBox.confirm("确定丢弃这张没录完的出库草稿吗？", "确认", { type: "warning" });
   clearDraft();
 }
 
@@ -160,7 +199,7 @@ function resetForm() {
   });
 }
 function addRow() {
-  form.rows.push({ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, reason: "", ocrName: "" });
+  form.rows.push(blankRow());
 }
 function removeRow(i: number) {
   form.rows.splice(i, 1);
@@ -186,6 +225,7 @@ async function openEdit(row: InboundReturnListItem) {
     imageUrl: row.images[0] ?? "",
     rows: [
       {
+        kind: row.kind ?? "return",
         productId: row.productId ?? "",
         weightJin: row.weightJin ?? 0,
         unitWeightG: row.unitWeightG ?? 0,
@@ -247,6 +287,7 @@ async function onOcrUpload(options: UploadRequestOptions) {
       ? r.items.map((it) => {
           const matched = fuzzyMatchProduct(it.sku, it.name, productsByFactory.value);
           return {
+            kind: RETURN_HINT.test(it.name) ? ("return" as const) : ("issue" as const),
             productId: matched?.id ?? "",
             weightJin: it.weightJin,
             unitWeightG: it.unitWeightG,
@@ -255,7 +296,7 @@ async function onOcrUpload(options: UploadRequestOptions) {
             ocrName: `${it.sku} ${it.name}`.trim(),
           };
         })
-      : [{ productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, reason: "", ocrName: "" }];
+      : [blankRow()];
 
     dialogVisible.value = true;
     ElMessage.success("识别完成，请核对后保存");
@@ -277,6 +318,7 @@ async function handleSubmit() {
     for (const row of valid) {
       const product = productsByFactory.value.find((p) => p.id === row.productId);
       const dto: CreateInboundReturnDto = {
+        kind: row.kind,
         factoryId: form.factoryId,
         productId: row.productId,
         sku: product?.sku ?? "",
@@ -297,6 +339,7 @@ async function handleSubmit() {
     const row = valid[0];
     const product = productsByFactory.value.find((p) => p.id === row.productId);
     await updateInboundReturn(editingId.value, {
+      kind: row.kind,
       factoryId: form.factoryId,
       productId: row.productId,
       sku: product?.sku,
@@ -319,7 +362,7 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: InboundReturnListItem) {
-  await ElMessageBox.confirm(`确定删除这条「${row.factoryName} · ${row.sku}」的退货记录吗？`, "二次确认", {
+  await ElMessageBox.confirm(`确定删除这条「${row.factoryName} · ${row.sku}」的${KIND_LABEL[row.kind]}记录吗？`, "二次确认", {
     type: "warning",
   });
   await deleteInboundReturn(row.id);
@@ -337,26 +380,36 @@ onMounted(async () => {
 <template>
   <div>
     <div class="toolbar">
-      <el-button type="primary" @click="openCreate">新增退货</el-button>
+      <el-button type="primary" @click="openCreate">新增出库单</el-button>
       <el-upload :show-file-list="false" accept="image/*" :http-request="onOcrUpload" :disabled="uploading">
         <el-button :loading="uploading">
           <el-icon><Plus /></el-icon>
-          导入退货单图片
+          导入出库单图片
         </el-button>
       </el-upload>
+      <el-radio-group v-model="kindFilter" size="default" class="kind-filter">
+        <el-radio-button value="">全部</el-radio-button>
+        <el-radio-button value="issue">发料</el-radio-button>
+        <el-radio-button value="return">退货</el-radio-button>
+      </el-radio-group>
     </div>
 
     <el-alert v-if="draftAvailable" type="warning" :closable="false" show-icon style="margin-bottom: 12px">
       <template #title>
-        有一张没录完的退货草稿（上次意外关闭 / 刷新时自动存下的）
+        有一张没录完的出库草稿（上次意外关闭 / 刷新时自动存下的）
         <el-button link type="primary" @click="restoreDraft">恢复</el-button>
         <el-button link type="danger" @click="discardDraft">丢弃</el-button>
       </template>
     </el-alert>
 
-    <el-table v-loading="loading" :data="list" stripe size="small">
-      <el-table-column label="退货日期" width="120">
+    <el-table v-loading="loading" :data="filteredList" stripe size="small">
+      <el-table-column label="出库日期" width="120">
         <template #default="{ row }">{{ (row.returnDate ?? "").slice(0, 10) }}</template>
+      </el-table-column>
+      <el-table-column label="类型" width="80" align="center">
+        <template #default="{ row }">
+          <el-tag :type="row.kind === 'return' ? 'danger' : 'primary'" size="small" effect="plain">{{ kindLabel(row.kind) }}</el-tag>
+        </template>
       </el-table-column>
       <el-table-column prop="factoryName" label="玩具厂" width="140" />
       <el-table-column prop="sku" label="货号" width="100" />
@@ -378,10 +431,14 @@ onMounted(async () => {
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column label="金额" width="110" align="right">
-        <template #default="{ row }">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
+      <!-- 发料不影响应收，金额没意义，不展示；退货的金额才是从应收里扣的那个数 -->
+      <el-table-column label="退货金额" width="110" align="right">
+        <template #default="{ row }">
+          <template v-if="row.kind === 'return'">¥{{ row.amount.toLocaleString(undefined, { minimumFractionDigits: 2 }) }}</template>
+          <span v-else class="muted">-</span>
+        </template>
       </el-table-column>
-      <el-table-column prop="reason" label="退货原因" width="120" show-overflow-tooltip />
+      <el-table-column prop="reason" label="原因" width="120" show-overflow-tooltip />
       <el-table-column label="凭证" width="70" align="center">
         <template #default="{ row }">
           <el-image
@@ -404,9 +461,9 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增退货' : '编辑退货'" width="min(880px, 95vw)">
+    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增出库单' : '编辑出库单'" width="min(980px, 95vw)">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
-        <el-form-item v-if="form.imageUrl" label="退货单">
+        <el-form-item v-if="form.imageUrl" label="出库单">
           <div
             class="slip-frame"
             :class="{ 'slip-frame--zoomed': slipZoomLevel > 1, 'slip-frame--dragging': slipDragging }"
@@ -422,7 +479,7 @@ onMounted(async () => {
             <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="退货日期" prop="returnDate">
+        <el-form-item label="出库日期" prop="returnDate">
           <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
         <el-form-item label="货号明细">
@@ -436,7 +493,8 @@ onMounted(async () => {
               <span class="col-label">克重(g)</span>
               <span class="col-label">数量</span>
               <span class="col-label">算出数量</span>
-              <span class="col-label">退货原因</span>
+              <span class="col-label">类型</span>
+              <span class="col-label">原因</span>
               <span class="col-label">操作</span>
             </div>
             <div v-for="(row, idx) in form.rows" :key="idx" class="rows-grid">
@@ -457,7 +515,12 @@ onMounted(async () => {
               <span class="calc-qty" :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }">
                 {{ qtyCalculated(row) }}
               </span>
-              <el-input v-model="row.reason" placeholder="比如：破损/色差" />
+              <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对 -->
+              <el-select v-model="row.kind" style="width: 100%" :class="{ 'kind-select--return': row.kind === 'return' }">
+                <el-option label="发料" value="issue" />
+                <el-option label="退货" value="return" />
+              </el-select>
+              <el-input v-model="row.reason" :placeholder="row.kind === 'return' ? '比如：破损/色差' : '选填'" />
               <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
@@ -541,11 +604,24 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  grid-template-columns: 190px 95px 95px 95px 90px 120px 60px;
+  /* 货号 / 重量 / 克重 / 数量 / 算出数量 / 类型 / 原因 / 操作 */
+  grid-template-columns: 190px 95px 95px 95px 80px 90px 120px 60px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  min-width: 790px;
+  min-width: 880px;
+}
+
+/* 选了"退货"的那一行，类型下拉框变红，一眼看出哪几行会从应收里扣钱 */
+.kind-select--return :deep(.el-select__wrapper) {
+  box-shadow: 0 0 0 1px #f56c6c inset;
+}
+.kind-select--return :deep(.el-select__selected-item) {
+  color: #f56c6c;
+}
+
+.kind-filter {
+  margin-left: auto;
 }
 
 .rows-grid--header {

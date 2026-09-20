@@ -28,7 +28,9 @@ const activeTab = computed({
     <el-tab-pane label="入库" name="inbound" lazy>
       <InboundListView />
     </el-tab-pane>
-    <el-tab-pane label="退货" name="return" lazy>
+    <!-- 出库单（发料 + 退货）。tab 的 name 还是 "return"，是为了之前分享/收藏的
+         ?tab=return 链接继续能用，显示的名字改成"出库" -->
+    <el-tab-pane label="出库" name="return" lazy>
       <InboundReturnListView />
     </el-tab-pane>
     <el-tab-pane label="单据相册" name="gallery" lazy>

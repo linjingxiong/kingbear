@@ -13,6 +13,7 @@ import { UpdateInboundReturnDto } from './dto/update-inbound-return.dto';
 // "inferred type cannot be named"，这里手动给个显式类型（跟 factory.service 同样的坑）
 export interface InboundReturnListItem {
   id: string;
+  kind: 'issue' | 'return';
   factoryId: string;
   productId: string | null;
   sku: string;
@@ -70,9 +71,11 @@ export class InboundReturnService {
     const factories = await this.factoryModel.find().lean();
     const factoryNameMap = new Map(factories.map((f) => [String(f._id), f.name]));
 
-    return list.map(({ _id, __v, factoryId, productId, ...rest }) => ({
+    // .lean() 不会套 schema 的 default，老记录没有 kind 字段，这里手动补成 "return"
+    return list.map(({ _id, __v, factoryId, productId, kind, ...rest }) => ({
       ...rest,
       id: String(_id),
+      kind: kind ?? 'return',
       factoryId: String(factoryId),
       productId: productId ? String(productId) : null,
       factoryName: factoryNameMap.get(String(factoryId)) ?? '未知玩具厂',

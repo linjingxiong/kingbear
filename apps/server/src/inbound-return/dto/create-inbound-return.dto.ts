@@ -1,6 +1,10 @@
-import { IsArray, IsDateString, IsMongoId, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsArray, IsDateString, IsIn, IsMongoId, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateInboundReturnDto {
+  @IsOptional()
+  @IsIn(['issue', 'return'])
+  kind?: 'issue' | 'return';
+
   @IsMongoId()
   factoryId: string;
 
