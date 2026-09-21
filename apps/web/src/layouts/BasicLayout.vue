@@ -14,38 +14,44 @@ const tabsStore = useTabsStore();
 // 桌面端这个开关完全不生效，侧边栏一直显示，不受影响
 const sidebarOpen = ref(false);
 
-const menuItems = [
-  { title: "首页", icon: "HomeFilled", children: [{ path: "/dashboard", title: "首页 Dashboard", icon: "Odometer" }] },
-  // 往来单位：玩具厂、代工厂（以后还有工人/加工代理）统一的入口——新增/编辑/删除和查看全部出入库都在这里
-  { title: "往来单位", icon: "Connection", children: [{ path: "/party", title: "往来单位", icon: "Connection" }] },
+interface MenuLeaf {
+  path: string;
+  title: string;
+  icon: string;
+}
+interface MenuGroup {
+  title: string;
+  icon: string;
+  children: MenuLeaf[];
+}
+
+// 一级菜单里只有一个页面的（首页、往来单位）直接做成链接，不再套一层"点开还是同名一项"的分组；
+// 有多个页面的才分组：业务管理=日常操作、基础资料=一次性维护的档案、财务管理=钱的事（以后结余、计件也放这里）
+const menuItems: (MenuLeaf | MenuGroup)[] = [
+  { path: "/dashboard", title: "首页", icon: "HomeFilled" },
+  // 往来单位：玩具厂、代工厂、我（以后还有工人/加工代理）统一的入口——新增/编辑/删除和查看全部出入库都在这里
+  { path: "/party", title: "往来单位", icon: "Connection" },
+  {
+    title: "业务管理",
+    icon: "Van",
+    children: [
+      // 入库、出库操作流程很像，合并成一个页面用 tab 切换（见 InboundHubView）：入库 / 出库 / 单据相册
+      { path: "/inbound", title: "出入库管理", icon: "Van" },
+      // 物料发放/成品回收/通用物料回收/物料对账，都是围绕"代工厂物料收发"这一件事，
+      // 合并成一个页面用 tab 切换（见 MaterialFlowHubView）
+      { path: "/material-flow", title: "物料流转", icon: "Promotion" },
+      { path: "/asset", title: "资产盘点", icon: "Suitcase" },
+    ],
+  },
   {
     title: "基础资料",
     icon: "Notebook",
     children: [
       { path: "/product", title: "产品管理", icon: "Box" },
-    ],
-  },
-  {
-    title: "业务管理",
-    icon: "Van",
-    children: [
-      // 入库、入库退货操作流程很像，合并成一个页面用 tab 切换（见 InboundHubView），
-      // 这里只留一个菜单入口，进去之后自己选 tab（入库 / 出库 / 单据相册）
-      { path: "/inbound", title: "出入库管理", icon: "Van" },
-      { path: "/asset", title: "资产盘点", icon: "Suitcase" },
+      { path: "/common-material", title: "通用物料", icon: "Goods" },
     ],
   },
   { title: "财务管理", icon: "Money", children: [{ path: "/billing", title: "应收账单", icon: "Money" }] },
-  {
-    title: "代工厂管理",
-    icon: "OfficeBuilding",
-    children: [
-      { path: "/common-material", title: "通用物料", icon: "Goods" },
-      // 物料发放/成品回收/通用物料回收/物料对账，都是围绕"代工厂物料收发"这一件事，
-      // 合并成一个页面用 tab 切换（见 MaterialFlowHubView），原来4个菜单项合成这1个
-      { path: "/material-flow", title: "物料流转", icon: "Promotion" },
-    ],
-  },
 ];
 
 watch(
@@ -61,9 +67,13 @@ const activeMenu = computed(() => `/${route.path.split("/")[1] ?? "dashboard"}`)
 
 // 头部面包屑用的当前页标题+图标，跟侧边栏选中的是同一个菜单项——不用再单独维护一份映射
 const currentMenuItem = computed(() => {
-  for (const group of menuItems) {
-    const found = group.children.find((c) => c.path === activeMenu.value);
-    if (found) return found;
+  for (const entry of menuItems) {
+    if ("children" in entry) {
+      const found = entry.children.find((c) => c.path === activeMenu.value);
+      if (found) return found;
+    } else if (entry.path === activeMenu.value) {
+      return entry;
+    }
   }
   return null;
 });
@@ -108,16 +118,22 @@ function handleUserCommand(command: string) {
         router
         @select="sidebarOpen = false"
       >
-        <el-sub-menu v-for="group in menuItems" :key="group.title" :index="group.title">
-          <template #title>
-            <el-icon><component :is="group.icon" /></el-icon>
-            <span>{{ group.title }}</span>
-          </template>
-          <el-menu-item v-for="item in group.children" :key="item.path" :index="item.path">
-            <el-icon><component :is="item.icon" /></el-icon>
-            <template #title>{{ item.title }}</template>
+        <template v-for="entry in menuItems" :key="entry.title">
+          <el-sub-menu v-if="'children' in entry" :index="entry.title">
+            <template #title>
+              <el-icon><component :is="entry.icon" /></el-icon>
+              <span>{{ entry.title }}</span>
+            </template>
+            <el-menu-item v-for="item in entry.children" :key="item.path" :index="item.path">
+              <el-icon><component :is="item.icon" /></el-icon>
+              <template #title>{{ item.title }}</template>
+            </el-menu-item>
+          </el-sub-menu>
+          <el-menu-item v-else :index="entry.path">
+            <el-icon><component :is="entry.icon" /></el-icon>
+            <template #title>{{ entry.title }}</template>
           </el-menu-item>
-        </el-sub-menu>
+        </template>
       </el-menu>
     </el-aside>
 
