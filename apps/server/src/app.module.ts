@@ -17,6 +17,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { AssetModule } from './asset/asset.module';
 import { OemFactoryModule } from './oem-factory/oem-factory.module';
 import { CommonMaterialModule } from './common-material/common-material.module';
+import { AssetTypeModule } from './asset-type/asset-type.module';
 import { CommonMaterialReturnModule } from './common-material-return/common-material-return.module';
 import { MaterialIssuanceModule } from './material-issuance/material-issuance.module';
 import { OemReceiptModule } from './oem-receipt/oem-receipt.module';
@@ -49,6 +50,7 @@ import { PartyModule } from './party/party.module';
     AssetModule,
     OemFactoryModule,
     CommonMaterialModule,
+    AssetTypeModule,
     CommonMaterialReturnModule,
     MaterialIssuanceModule,
     OemReceiptModule,

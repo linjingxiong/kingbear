@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions }
 import type { Asset, CreateAssetDto } from "@kingbear/shared";
 import { createAsset, deleteAsset, listAssets, updateAsset, uploadAssetImage } from "../../api/asset";
 import { listOemFactories } from "../../api/oem-factory";
+import { createAssetType, listAssetTypes } from "../../api/asset-type";
 
 const list = ref<Asset[]>([]);
 const loading = ref(false);
@@ -15,6 +16,24 @@ const custodianOptions = computed(() => [{ label: "代工厂", options: oemFacto
 
 async function loadOemFactoryNames() {
   oemFactoryNames.value = (await listOemFactories()).map((f) => f.name);
+}
+
+// 资产名称：单独维护一份"资产类型"名录（见 asset-type 模块），下拉里选；
+// 输入一个名录里没有的新名字，保存的时候顺手把它记进名录，下次就能直接选了——
+// 不用另开一个"资产类型管理"页面来回切换
+const assetTypeNames = ref<string[]>([]);
+
+async function loadAssetTypeNames() {
+  assetTypeNames.value = (await listAssetTypes()).map((t) => t.name);
+}
+
+/** 表单里填的资产名称如果是名录里没有的新名字，先存进资产类型名录 */
+async function ensureAssetType(name: string) {
+  const trimmed = name.trim();
+  if (trimmed && !assetTypeNames.value.includes(trimmed)) {
+    await createAssetType({ name: trimmed });
+    assetTypeNames.value.push(trimmed);
+  }
 }
 
 async function load() {
@@ -74,6 +93,7 @@ function openEdit(row: Asset) {
 
 async function handleSubmit() {
   await formRef.value?.validate();
+  await ensureAssetType(form.name);
   if (dialogMode.value === "create") {
     await createAsset(form);
   } else if (editingId.value) {
@@ -111,6 +131,7 @@ function removeImage(index: number) {
 onMounted(() => {
   load();
   loadOemFactoryNames();
+  loadAssetTypeNames();
 });
 </script>
 
@@ -171,7 +192,17 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="资产名称" prop="name">
-          <el-input v-model="form.name" />
+          <!-- 从资产类型名录里选；输错找不到就直接打新名字，保存时会顺手记进名录，下次就有了 -->
+          <el-select
+            v-model="form.name"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择资产类型，或直接输入新类型"
+            style="width: 100%"
+          >
+            <el-option v-for="name in assetTypeNames" :key="name" :label="name" :value="name" />
+          </el-select>
         </el-form-item>
         <el-form-item label="数量" prop="qty">
           <el-input-number v-model="form.qty" :min="0" controls-position="right" style="width: 160px" />
