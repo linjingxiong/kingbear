@@ -1,11 +1,21 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions } from "element-plus";
 import type { Asset, CreateAssetDto } from "@kingbear/shared";
 import { createAsset, deleteAsset, listAssets, updateAsset, uploadAssetImage } from "../../api/asset";
+import { listOemFactories } from "../../api/oem-factory";
 
 const list = ref<Asset[]>([]);
 const loading = ref(false);
+
+// 资产管理人还是存自由文本（数据库不用改），只是录入时给个下拉方便选，不用每次手打名字。
+// 现在只有代工厂这一种来源；以后有了"工人"这个角色，再加一个分组就行，不用改数据结构
+const oemFactoryNames = ref<string[]>([]);
+const custodianOptions = computed(() => [{ label: "代工厂", options: oemFactoryNames.value }]);
+
+async function loadOemFactoryNames() {
+  oemFactoryNames.value = (await listOemFactories()).map((f) => f.name);
+}
 
 async function load() {
   loading.value = true;
@@ -98,7 +108,10 @@ function removeImage(index: number) {
   form.images!.splice(index, 1);
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadOemFactoryNames();
+});
 </script>
 
 <template>
@@ -142,7 +155,20 @@ onMounted(load);
     <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增资产领用' : '编辑资产领用'" width="520px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="资产管理人" prop="custodian">
-          <el-input v-model="form.custodian" placeholder="领用人" />
+          <!-- filterable + allow-create：能从代工厂里选，也能直接手打名字（比如玩具厂自己的人），
+               不会因为下拉里没有这个名字就选不了 -->
+          <el-select
+            v-model="form.custodian"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择代工厂，或直接输入姓名"
+            style="width: 100%"
+          >
+            <el-option-group v-for="group in custodianOptions" :key="group.label" :label="group.label">
+              <el-option v-for="name in group.options" :key="name" :label="name" :value="name" />
+            </el-option-group>
+          </el-select>
         </el-form-item>
         <el-form-item label="资产名称" prop="name">
           <el-input v-model="form.name" />
