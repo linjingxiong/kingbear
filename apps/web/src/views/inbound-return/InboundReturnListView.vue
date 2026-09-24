@@ -675,6 +675,7 @@ onMounted(async () => {
                 :disabled="!form.factoryId"
                 placeholder="产品（选填）"
                 style="width: 100%"
+                popper-class="tag-cloud-dropdown"
                 @change="onRowProductGroupChange(row)"
               >
                 <el-option v-for="g in productGroups" :key="g.id" :label="g.name" :value="g.id" />
@@ -691,7 +692,16 @@ onMounted(async () => {
               >
                 <el-option v-for="p in productsByFactory" :key="p.id" :label="`${p.sku} · ${p.name}`" :value="p.id" />
               </el-select>
-              <el-select v-else v-model="row.materialName" filterable allow-create default-first-option placeholder="物料名称" style="width: 100%">
+              <el-select
+                v-else
+                v-model="row.materialName"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="物料名称"
+                style="width: 100%"
+                popper-class="tag-cloud-dropdown"
+              >
                 <el-option v-for="name in materialOptionsFor(row)" :key="name" :label="name" :value="name" />
               </el-select>
 
@@ -932,6 +942,59 @@ onMounted(async () => {
 
   .slip-frame {
     height: 260px;
+  }
+}
+</style>
+
+<!-- 产品/物料下拉的选项太多时逐个滚动很费劲，改成"标签墙"：把每个选项变成一个圆角小标签，
+     横向排满一行再往下走，一眼看到一大片，点哪个是哪个，比竖着一条条滚快得多。
+     下拉弹层是 teleport 到 body 上的，scoped 样式够不着，这里单独开一个不带 scoped 的
+     style block，用 popper-class="tag-cloud-dropdown" 精确框定只影响这两个下拉，
+     不会波及玩具厂/类型这些别的下拉框 -->
+<style>
+.tag-cloud-dropdown {
+  min-width: 420px !important;
+}
+
+.tag-cloud-dropdown .el-select-dropdown__wrap {
+  max-height: 360px;
+}
+
+.tag-cloud-dropdown .el-select-dropdown__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+}
+
+.tag-cloud-dropdown .el-select-dropdown__item {
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  line-height: 1.4;
+  padding: 5px 14px;
+  border-radius: 14px;
+  background: #f2f3f5;
+  white-space: nowrap;
+}
+
+.tag-cloud-dropdown .el-select-dropdown__item.is-hovering {
+  background: #e6f0fd;
+}
+
+.tag-cloud-dropdown .el-select-dropdown__item.is-selected {
+  background: #ecf5ff;
+  color: #409eff;
+  font-weight: 600;
+}
+
+.tag-cloud-dropdown .el-select-dropdown__item.is-disabled {
+  opacity: 0.5;
+}
+
+@media (max-width: 480px) {
+  .tag-cloud-dropdown {
+    min-width: 260px !important;
   }
 }
 </style>
