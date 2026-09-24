@@ -12,12 +12,21 @@ import {
 } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { listProductsByFactory } from "../../api/product";
-import { createInboundReturn, deleteInboundReturn, listInboundReturns, recognizeInboundReturn, updateInboundReturn } from "../../api/inbound-return";
+import {
+  createInboundReturn,
+  deleteInboundReturn,
+  listInboundReturns,
+  recognizeInboundReturn,
+  recognizeOutboundIssue,
+  updateInboundReturn,
+} from "../../api/inbound-return";
 import { useImageZoomPan } from "../../composables/useImageZoomPan";
 
-// 出库单（玩具厂开的）：一张单里有两种行——"发料"（发原料/半成品给我加工，只做记录）和
-// "退货"（不合格的货退回来，会从应收账单里扣）。这个页面最早只管退货，后来把发料也做进来，
-// 文件名/接口名沿用没改，库里的老记录都是退货（没有 kind 字段的当退货处理）。
+// 出库单（玩具厂开的）：一张单里有两种行，记的东西完全不是一回事——
+// "发料"：玩具厂发原材料给我加工，原料没有货号，按"物料名称+重量(斤)"记，只做记录；
+// "退货"：不合格的成品/半成品退回来，按货号记（跟入库单同一套字段），会从应收账单里扣。
+// 这个页面最早只管退货，后来把发料也做进来，文件名/接口名沿用没改，库里的老记录都是退货
+//（没有 kind 字段的当退货处理）。
 // 出库单预览图：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互
 // （模板里 ref 只有作为顶层 setup 绑定才会自动解包，所以这里解构出来，不要整个对象一起传）
 const {
@@ -44,10 +53,6 @@ function kindLabel(kind: OutboundKind) {
 const kindFilter = ref<"" | OutboundKind>("");
 const filteredList = computed(() => (kindFilter.value ? list.value.filter((r) => r.kind === kindFilter.value) : list.value));
 
-// 单据上写的是"次品/退货/不合格"这类字眼的行，多半是退货，识别出来时预选"退货"省得一行行手动改；
-// 预选错了行内的类型下拉自己能改，只是个建议，不是自动判定
-const RETURN_HINT = /次品|退货|退回|不良|不合格|返工/;
-
 // 退货货号只能是选中的这个玩具厂自己的产品，换厂要重新拉一遍
 async function loadProducts(factoryId: string) {
   productsByFactory.value = factoryId ? await listProductsByFactory(factoryId) : [];
@@ -67,9 +72,15 @@ async function load() {
    （可编辑，留空就用公式算），qtyFinal() 拿到的才是最终要保存的数量 */
 type RowItem = {
   kind: OutboundKind;
+  /** 退货专用：选中的货号（工序） */
   productId: string;
+  /** 发料专用：物料名称，原材料没有货号 */
+  materialName: string;
+  /** 重量(斤)：两种类型都用得到 */
   weightJin: number;
+  /** 退货专用：单个克重(g)，用来从重量换算件数 */
   unitWeightG: number;
+  /** 退货专用：单据上写的数量 */
   qtyDeclared: number | null;
   reason: string;
   ocrName: string;
@@ -77,7 +88,7 @@ type RowItem = {
 
 // 新增一行默认"发料"：出库单里大部分是发料、偶尔夹几行退货，退货的那几行手动改一下
 function blankRow(kind: OutboundKind = "issue"): RowItem {
-  return { kind, productId: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, reason: "", ocrName: "" };
+  return { kind, productId: "", materialName: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, reason: "", ocrName: "" };
 }
 
 function qtyCalculated(row: RowItem) {
@@ -122,7 +133,9 @@ function formHasContent() {
     form.returnDate ||
     form.remark ||
     form.imageUrl ||
-    form.rows.some((r) => r.productId || r.weightJin > 0 || r.unitWeightG > 0 || r.qtyDeclared || r.reason || r.ocrName)
+    form.rows.some(
+      (r) => r.productId || r.materialName || r.weightJin > 0 || r.unitWeightG > 0 || r.qtyDeclared || r.reason || r.ocrName,
+    )
   );
 }
 function saveDraft() {
@@ -227,6 +240,7 @@ async function openEdit(row: InboundReturnListItem) {
       {
         kind: row.kind ?? "return",
         productId: row.productId ?? "",
+        materialName: row.materialName ?? "",
         weightJin: row.weightJin ?? 0,
         unitWeightG: row.unitWeightG ?? 0,
         qtyDeclared: row.qtyDeclared ?? row.qty,
@@ -263,9 +277,9 @@ function fuzzyMatchProduct(sku: string, name: string, products: Product[]): Prod
   return partial ?? null;
 }
 
-// 拍照识别：退货单跟入库单长得一样，复用入库单的识别接口 → 预填玩具厂/日期/货号行
-// （按货号或名字匹配，匹配不到留空让人工选）
-async function onOcrUpload(options: UploadRequestOptions) {
+// 拍照识别·退货：退货单跟入库单长得一样，复用入库单的识别接口 → 预填玩具厂/日期/货号行
+// （按货号或名字匹配，匹配不到留空让人工选）。这个入口识别到的都是退货，不用再猜类型
+async function onReturnOcrUpload(options: UploadRequestOptions) {
   uploading.value = true;
   try {
     const r = await recognizeInboundReturn(options.file as File);
@@ -287,16 +301,15 @@ async function onOcrUpload(options: UploadRequestOptions) {
       ? r.items.map((it) => {
           const matched = fuzzyMatchProduct(it.sku, it.name, productsByFactory.value);
           return {
-            kind: RETURN_HINT.test(it.name) ? ("return" as const) : ("issue" as const),
+            ...blankRow("return"),
             productId: matched?.id ?? "",
             weightJin: it.weightJin,
             unitWeightG: it.unitWeightG,
             qtyDeclared: it.qtyDeclared,
-            reason: "",
             ocrName: `${it.sku} ${it.name}`.trim(),
           };
         })
-      : [blankRow()];
+      : [blankRow("return")];
 
     dialogVisible.value = true;
     ElMessage.success("识别完成，请核对后保存");
@@ -305,29 +318,88 @@ async function onOcrUpload(options: UploadRequestOptions) {
   }
 }
 
+// 拍照识别·发料：发的是原材料，识别模板跟退货完全不一样（物料名称+重量，没有货号/克重），
+// 走单独的接口，识别到的行直接是"发料"，不用猜类型
+async function onIssueOcrUpload(options: UploadRequestOptions) {
+  uploading.value = true;
+  try {
+    const r = await recognizeOutboundIssue(options.file as File);
+    dialogMode.value = "create";
+    editingId.value = null;
+    resetForm();
+    form.imageUrl = r.imageUrl;
+
+    if (r.factoryName) {
+      const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
+      // 发料行不用选货号，这里仍然拉一下这个厂的产品列表——万一某一行手动改成"退货"，
+      // 货号下拉能马上有选项，不用等用户重新碰一下玩具厂选择框才触发加载
+      if (f) {
+        form.factoryId = f.id;
+        await loadProducts(f.id);
+      }
+    }
+    if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
+
+    form.rows = r.items.length
+      ? r.items.map((it) => ({ ...blankRow("issue"), materialName: it.materialName, weightJin: it.weightJin }))
+      : [blankRow("issue")];
+
+    dialogVisible.value = true;
+    ElMessage.success("识别完成，请核对后保存");
+  } finally {
+    uploading.value = false;
+  }
+}
+
+// 退货要选好货号、填重量；发料要填物料名称、填重量——两套字段各自的必填条件不一样
+function rowIsValid(r: RowItem) {
+  return r.kind === "return" ? !!r.productId && r.weightJin > 0 : !!r.materialName.trim() && r.weightJin > 0;
+}
+
+/** 一行的数据拼成要提交的字段（退货/发料两套完全不同的字段） */
+function buildRowFields(row: RowItem) {
+  if (row.kind === "return") {
+    const product = productsByFactory.value.find((p) => p.id === row.productId);
+    return {
+      productId: row.productId,
+      sku: product?.sku ?? "",
+      name: product?.name ?? "",
+      materialName: undefined,
+      weightJin: row.weightJin,
+      unitWeightG: row.unitWeightG,
+      qtyDeclared: row.qtyDeclared,
+      qty: qtyFinal(row),
+      factoryPrice: product?.factoryPrice ?? 0,
+    };
+  }
+  // 发料：原材料没有货号，qty 就直接等于重量(斤)——发料不参与账单，qty 只是满足字段必填
+  return {
+    productId: null,
+    sku: "",
+    name: "",
+    materialName: row.materialName.trim(),
+    weightJin: row.weightJin,
+    unitWeightG: 0,
+    qtyDeclared: null,
+    qty: row.weightJin,
+    factoryPrice: 0,
+  };
+}
+
 async function handleSubmit() {
   await formRef.value?.validate();
-  // 重量必填，克重、数量都选填——数量没填就按公式算，克重不填算出来是0，等以后知道了再补
-  const valid = form.rows.filter((r) => r.productId && r.weightJin > 0);
+  const valid = form.rows.filter(rowIsValid);
   if (!valid.length) {
-    ElMessage.warning("请至少填一行货号，并选好货号、填写重量(斤)");
+    ElMessage.warning("请至少填好一行：退货要选货号+填重量(斤)，发料要填物料名称+填重量(斤)");
     return;
   }
 
   if (dialogMode.value === "create") {
     for (const row of valid) {
-      const product = productsByFactory.value.find((p) => p.id === row.productId);
       const dto: CreateInboundReturnDto = {
         kind: row.kind,
         factoryId: form.factoryId,
-        productId: row.productId,
-        sku: product?.sku ?? "",
-        name: product?.name ?? "",
-        weightJin: row.weightJin,
-        unitWeightG: row.unitWeightG,
-        qtyDeclared: row.qtyDeclared,
-        qty: qtyFinal(row),
-        factoryPrice: product?.factoryPrice ?? 0,
+        ...buildRowFields(row),
         returnDate: form.returnDate,
         reason: row.reason,
         remark: form.remark,
@@ -337,18 +409,10 @@ async function handleSubmit() {
     }
   } else if (editingId.value) {
     const row = valid[0];
-    const product = productsByFactory.value.find((p) => p.id === row.productId);
     await updateInboundReturn(editingId.value, {
       kind: row.kind,
       factoryId: form.factoryId,
-      productId: row.productId,
-      sku: product?.sku,
-      name: product?.name,
-      weightJin: row.weightJin,
-      unitWeightG: row.unitWeightG,
-      qtyDeclared: row.qtyDeclared,
-      qty: qtyFinal(row),
-      factoryPrice: product?.factoryPrice,
+      ...buildRowFields(row),
       returnDate: form.returnDate,
       reason: row.reason,
       remark: form.remark,
@@ -362,7 +426,8 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: InboundReturnListItem) {
-  await ElMessageBox.confirm(`确定删除这条「${row.factoryName} · ${row.sku}」的${KIND_LABEL[row.kind]}记录吗？`, "二次确认", {
+  const itemLabel = row.kind === "return" ? row.sku : row.materialName || row.name;
+  await ElMessageBox.confirm(`确定删除这条「${row.factoryName} · ${itemLabel}」的${KIND_LABEL[row.kind]}记录吗？`, "二次确认", {
     type: "warning",
   });
   await deleteInboundReturn(row.id);
@@ -381,10 +446,18 @@ onMounted(async () => {
   <div>
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">新增出库单</el-button>
-      <el-upload :show-file-list="false" accept="image/*" :http-request="onOcrUpload" :disabled="uploading">
+      <!-- 发料、退货是两种完全不同的单据（发料只有物料名+重量，退货是货号那一套），
+           识别模板不一样，拆成两个导入入口，不用再靠关键词猜这一行到底是哪种 -->
+      <el-upload :show-file-list="false" accept="image/*" :http-request="onIssueOcrUpload" :disabled="uploading">
         <el-button :loading="uploading">
           <el-icon><Plus /></el-icon>
-          导入出库单图片
+          导入发料单图片
+        </el-button>
+      </el-upload>
+      <el-upload :show-file-list="false" accept="image/*" :http-request="onReturnOcrUpload" :disabled="uploading">
+        <el-button :loading="uploading">
+          <el-icon><Plus /></el-icon>
+          导入退货单图片
         </el-button>
       </el-upload>
       <el-radio-group v-model="kindFilter" size="default" class="kind-filter">
@@ -412,23 +485,30 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="factoryName" label="玩具厂" width="140" />
-      <el-table-column prop="sku" label="货号" width="100" />
-      <el-table-column prop="name" label="名称" show-overflow-tooltip />
+      <el-table-column label="货号" width="100">
+        <template #default="{ row }">{{ row.kind === "return" ? row.sku : "-" }}</template>
+      </el-table-column>
+      <el-table-column label="名称 / 物料" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.kind === "return" ? row.name : row.materialName || row.name }}</template>
+      </el-table-column>
       <el-table-column label="重量(斤)" width="90" align="right">
         <template #default="{ row }">{{ row.weightJin || "-" }}</template>
       </el-table-column>
       <el-table-column label="克重(g)" width="90" align="right">
-        <template #default="{ row }">{{ row.unitWeightG || "-" }}</template>
+        <template #default="{ row }">{{ row.kind === "return" ? row.unitWeightG || "-" : "-" }}</template>
       </el-table-column>
       <el-table-column label="数量" width="110" align="right">
         <template #default="{ row }">
-          {{ row.qty.toLocaleString() }}
-          <el-tooltip
-            v-if="row.qtyDeclared != null && hasBigQuantityDiff(row.qtyDeclared, calculateQuantity(row.weightJin, row.unitWeightG))"
-            content="跟按重量算出来的数量相差超过5个，很可能录错了，建议核对"
-          >
-            <el-icon class="diff-icon"><WarningFilled /></el-icon>
-          </el-tooltip>
+          <template v-if="row.kind === 'return'">
+            {{ row.qty.toLocaleString() }}
+            <el-tooltip
+              v-if="row.qtyDeclared != null && hasBigQuantityDiff(row.qtyDeclared, calculateQuantity(row.weightJin, row.unitWeightG))"
+              content="跟按重量算出来的数量相差超过5个，很可能录错了，建议核对"
+            >
+              <el-icon class="diff-icon"><WarningFilled /></el-icon>
+            </el-tooltip>
+          </template>
+          <span v-else class="muted">-</span>
         </template>
       </el-table-column>
       <!-- 发料不影响应收，金额没意义，不展示；退货的金额才是从应收里扣的那个数 -->
@@ -488,7 +568,7 @@ onMounted(async () => {
                对不上就是红色，不用悬浮/点击才能看到，一眼就能核对是不是录错了 -->
           <div class="rows-editor">
             <div class="rows-grid rows-grid--header">
-              <span class="col-label">货号</span>
+              <span class="col-label">货号 / 物料</span>
               <span class="col-label col-label--required">重量(斤)</span>
               <span class="col-label">克重(g)</span>
               <span class="col-label">数量</span>
@@ -497,8 +577,11 @@ onMounted(async () => {
               <span class="col-label">原因</span>
               <span class="col-label">操作</span>
             </div>
+            <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，直接打物料名称。
+                 两种字段完全不同，同一列位置按这一行的类型切换控件，8 列不变，跟表头对齐 -->
             <div v-for="(row, idx) in form.rows" :key="idx" class="rows-grid">
               <el-select
+                v-if="row.kind === 'return'"
                 v-model="row.productId"
                 filterable
                 :disabled="!form.factoryId"
@@ -507,14 +590,40 @@ onMounted(async () => {
               >
                 <el-option v-for="p in productsByFactory" :key="p.id" :label="`${p.sku} · ${p.name}`" :value="p.id" />
               </el-select>
+              <el-input v-else v-model="row.materialName" placeholder="物料名称" />
+
               <el-input-number v-model="row.weightJin" :min="0" :precision="3" controls-position="right" style="width: 100%" />
-              <el-input-number v-model="row.unitWeightG" :min="0" :precision="3" controls-position="right" style="width: 100%" />
-              <el-input-number v-model="row.qtyDeclared" :min="0" controls-position="right" style="width: 100%" />
-              <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，跟"数量"这一列不是一回事——
-                   不一致就标红，方便对照原始单据核对到底是哪个数抄错了 -->
-              <span class="calc-qty" :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }">
+
+              <el-input-number
+                v-if="row.kind === 'return'"
+                v-model="row.unitWeightG"
+                :min="0"
+                :precision="3"
+                controls-position="right"
+                style="width: 100%"
+              />
+              <span v-else class="muted col-dash">-</span>
+
+              <el-input-number
+                v-if="row.kind === 'return'"
+                v-model="row.qtyDeclared"
+                :min="0"
+                controls-position="right"
+                style="width: 100%"
+              />
+              <span v-else class="muted col-dash">-</span>
+
+              <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，只有退货用得到——发料只按重量记，
+                   没有件数这回事 -->
+              <span
+                v-if="row.kind === 'return'"
+                class="calc-qty"
+                :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }"
+              >
                 {{ qtyCalculated(row) }}
               </span>
+              <span v-else class="muted col-dash">-</span>
+
               <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对 -->
               <el-select v-model="row.kind" style="width: 100%" :class="{ 'kind-select--return': row.kind === 'return' }">
                 <el-option label="发料" value="issue" />
@@ -586,6 +695,9 @@ onMounted(async () => {
 }
 .muted {
   color: #c0c4cc;
+}
+.col-dash {
+  text-align: center;
 }
 .diff-icon {
   color: #f56c6c;

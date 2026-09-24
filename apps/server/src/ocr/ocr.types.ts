@@ -36,6 +36,23 @@ export interface MaterialDispatchOcrItem {
   qty: number;
 }
 
+/** 玩具厂出库单·发料的识别结果：发的是原材料，只有物料名称和重量(斤)，没有货号/克重——
+ * 跟"发料单"（MaterialDispatchOcrResult，我发给代工厂）不是同一件事，那个按数量记、这个按重量记 */
+export interface OutboundIssueOcrResult {
+  /** 玩具厂名称，识别失败给 null */
+  factoryName: string | null;
+  /** 出库日期，yyyy-MM-dd，识别失败给 null */
+  date: string | null;
+  items: OutboundIssueOcrItem[];
+}
+
+export interface OutboundIssueOcrItem {
+  /** 物料名 */
+  materialName: string;
+  /** 重量（斤） */
+  weightJin: number;
+}
+
 /** 成品/半成品回收单识别结果：哪个代工厂交回的、哪个产品、日期、一列货号/名称和数量 */
 export interface OemReceiptOcrResult {
   oemFactoryName: string | null;
@@ -59,8 +76,10 @@ export interface OemReceiptOcrItem {
 export interface OcrProvider {
   /** imagePath 是图片在本地磁盘上的真实路径（不是对外的 /uploads URL） */
   recognizeInboundImage(imagePath: string): Promise<OcrRawResult>;
-  /** 发料单识别 */
+  /** 发料单识别（我发给代工厂的物料，按数量记） */
   recognizeMaterialDispatchImage(imagePath: string): Promise<MaterialDispatchOcrResult>;
+  /** 玩具厂出库单·发料识别（玩具厂发给我的原材料，按重量记） */
+  recognizeOutboundIssueImage(imagePath: string): Promise<OutboundIssueOcrResult>;
   /** 成品/半成品回收单识别 */
   recognizeOemReceiptImage(imagePath: string): Promise<OemReceiptOcrResult>;
 }

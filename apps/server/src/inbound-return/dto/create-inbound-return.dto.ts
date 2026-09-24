@@ -12,11 +12,19 @@ export class CreateInboundReturnDto {
   @IsMongoId()
   productId?: string | null;
 
+  // 退货必填（货号），发料不填（原材料没有货号，用 materialName）
+  @IsOptional()
   @IsString()
-  sku: string;
+  sku?: string;
 
+  @IsOptional()
   @IsString()
-  name: string;
+  name?: string;
+
+  // 发料必填（物料名称），退货不填
+  @IsOptional()
+  @IsString()
+  materialName?: string;
 
   @IsOptional()
   @IsNumber()

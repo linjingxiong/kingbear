@@ -6,7 +6,13 @@ import { Document, Types } from 'mongoose';
  * 区分；集合名/类名沿用 inboundReturns/InboundReturn 没改，库里已有的记录不用迁移。
  * 退货行不改动原来那条入库单，账单页对账用"入库合计 - 退货合计"，见 billing.service.ts；
  * 发料行只做记录，不进账单。数量模型（weightJin/unitWeightG/qtyDeclared/qty）
- * 跟入库单、成品回收一样，见 packages/shared/src/quantity.ts。 */
+ * 跟入库单、成品回收一样，见 packages/shared/src/quantity.ts。
+ *
+ * 发料和退货记的根本不是一回事：退货是退回已经入库过的成品/半成品，按货号（sku/name/
+ * productId/unitWeightG/qty）记，这套字段是给退货用的；发料是玩具厂发原材料给我，原料
+ * 没有货号，按"物料名称 + 重量(斤)"（materialName/weightJin）记。所以 sku/name/productId/
+ * unitWeightG 在发料行上是空的，materialName 在退货行上是空的——两套字段共用一张表，
+ * 靠 kind 区分该看哪一套，不是每个字段都必填。 */
 @Schema({ timestamps: true, collection: 'inboundReturns' })
 export class InboundReturn extends Document {
   /** issue=发料（不影响应收）/ return=退货（从应收里扣）。老记录没有这个字段，
@@ -20,11 +26,17 @@ export class InboundReturn extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Product', default: null, index: true })
   productId: Types.ObjectId | null;
 
-  @Prop({ required: true })
+  /** 退货必填（原材料没有货号，发料行留空） */
+  @Prop({ default: '' })
   sku: string;
 
-  @Prop({ required: true })
+  /** 退货是工序名称；发料这个字段留空，物料名称存在下面的 materialName 里 */
+  @Prop({ default: '' })
   name: string;
+
+  /** 物料名称，发料专用 */
+  @Prop()
+  materialName?: string;
 
   /** 重量（斤） */
   @Prop({ default: 0 })

@@ -26,6 +26,15 @@ export class InboundReturnController {
     return { imageUrl, ...ocr };
   }
 
+  /** 上传发料单图片，识别的是原材料（物料名称+重量），跟退货识别模板不一样 */
+  @Post('recognize-issue')
+  @UseInterceptors(FileInterceptor('file', inboundReturnImageMulterOptions(process.env.UPLOAD_DIR ?? 'uploads')))
+  async recognizeIssue(@UploadedFile() file: Express.Multer.File) {
+    const imageUrl = toPublicUploadUrl(this.uploadDir, file.path);
+    const ocr = await this.returnService.recognizeIssue(file.path);
+    return { imageUrl, ...ocr };
+  }
+
   @Post()
   create(@Body() dto: CreateInboundReturnDto) {
     return this.returnService.create(dto);

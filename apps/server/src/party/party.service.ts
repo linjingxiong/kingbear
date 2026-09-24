@@ -250,6 +250,8 @@ export class PartyService {
     for (const r of outbounds) {
       // 老记录没有 kind 字段（这张表最早只存退货），当退货处理
       const isIssue = r.kind === 'issue';
+      // 发料记的是原材料（物料名称+重量），退货记的是已经入库过的成品/半成品（货号）——
+      // 两种性质不同，itemKind/itemKey 不能都按货号算，发料没有货号
       rows.push({
         key: `outbound:${r._id}`,
         source: isIssue ? 'outbound_issue' : 'outbound_return',
@@ -257,13 +259,13 @@ export class PartyService {
         date: r.returnDate.toISOString(),
         direction: 'out',
         typeLabel: isIssue ? '出库单·发料' : '出库单·退货',
-        itemKind: 'product',
-        itemKey: r.sku,
-        itemName: r.name,
-        sku: r.sku,
+        itemKind: isIssue ? 'material' : 'product',
+        itemKey: isIssue ? r.materialName || r.name : r.sku,
+        itemName: isIssue ? r.materialName || r.name : r.name,
+        sku: isIssue ? undefined : r.sku,
         qty: r.qty,
         weightJin: r.weightJin,
-        unitWeightG: r.unitWeightG,
+        unitWeightG: isIssue ? undefined : r.unitWeightG,
         reason: r.reason || undefined,
         remark: r.remark,
         images: r.images ?? [],

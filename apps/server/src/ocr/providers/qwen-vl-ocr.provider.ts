@@ -10,6 +10,8 @@ import type {
   OcrRawResult,
   OemReceiptOcrItem,
   OemReceiptOcrResult,
+  OutboundIssueOcrItem,
+  OutboundIssueOcrResult,
 } from '../ocr.types';
 
 // 阿里云 DashScope 的 OpenAI 兼容模式端点，通义千问 VL 系列模型都走这个
@@ -78,6 +80,31 @@ function buildDispatchSystemPrompt(): string {
 }
 
 /** 每次调用都重新生成，年份用"现在" */
+function buildOutboundIssueSystemPrompt(): string {
+  const currentYear = new Date().getFullYear();
+  return `你是玩具加工厂的出库单据识别助手。用户会给你一张玩具厂"发料"出库单的照片——玩具厂发原材料
+给加工方时开的单据，上面一般包含：玩具厂名称、日期、若干行物料明细（物料名、重量(斤)）。
+注意这是原材料，还没有加工成产品，不会有货号，单据上也不会有克重/件数这类字段。
+
+只输出一个 JSON 对象，不要输出任何解释文字、不要用 markdown 代码块包裹，格式：
+
+{
+  "factoryName": "玩具厂名称，识别不到给 null",
+  "date": "出库日期，格式 yyyy-MM-dd，识别不到给 null",
+  "items": [
+    { "materialName": "物料名", "weightJin": 重量数字（单位：斤，纯数字不带单位） }
+  ]
+}
+
+注意：
+- weightJin 必须是 JSON number，不带单位、不用字符串
+- 单据上有多行物料，items 要包含所有行
+- 日期只写两位年份（如"26年8月2日"）一律理解成 20xx 年；完全没写年份就按 ${currentYear} 年，
+  月、日照单据上的数字来，不要因为年份不确定就丢掉整个 date
+- 完全看不清或者不是出库/发料单据，各字段给 null，items 给空数组`;
+}
+
+/** 每次调用都重新生成，年份用"现在" */
 function buildOemReceiptSystemPrompt(): string {
   const currentYear = new Date().getFullYear();
   return `你是玩具加工厂的成品/半成品回收单据识别助手。用户会给你一张"回收单"（或叫领料单/还货单）的照片——
@@ -130,6 +157,16 @@ export class QwenVlOcrProvider implements OcrProvider {
     );
     if (content == null) return emptyDispatchResult();
     return parseDispatchResult(content, this.logger);
+  }
+
+  async recognizeOutboundIssueImage(imagePath: string): Promise<OutboundIssueOcrResult> {
+    const content = await this.callQwenVl(
+      imagePath,
+      buildOutboundIssueSystemPrompt(),
+      '请识别这张玩具厂发料出库单图片，按要求的 JSON 格式输出。',
+    );
+    if (content == null) return emptyOutboundIssueResult();
+    return parseOutboundIssueResult(content, this.logger);
   }
 
   async recognizeOemReceiptImage(imagePath: string): Promise<OemReceiptOcrResult> {
@@ -276,6 +313,30 @@ function parseDispatchResult(content: string, logger: Logger): MaterialDispatchO
   } catch (err) {
     logger.error(`通义千问 VL 发料单返回不是合法 JSON: ${(err as Error).message}\n原始返回: ${content}`);
     return emptyDispatchResult();
+  }
+}
+
+function emptyOutboundIssueResult(): OutboundIssueOcrResult {
+  return { factoryName: null, date: null, items: [] };
+}
+
+function parseOutboundIssueResult(content: string, logger: Logger): OutboundIssueOcrResult {
+  try {
+    const parsed = JSON.parse(extractJsonText(content)) as Partial<OutboundIssueOcrResult>;
+    const items: OutboundIssueOcrItem[] = Array.isArray(parsed.items)
+      ? parsed.items
+          .filter((it): it is OutboundIssueOcrItem => !!it && typeof it === 'object')
+          .map((it) => ({ materialName: toStr(it.materialName), weightJin: toNum(it.weightJin) }))
+          .filter((it) => it.materialName)
+      : [];
+    return {
+      factoryName: parsed.factoryName ? toStr(parsed.factoryName) : null,
+      date: parsed.date ? toStr(parsed.date) : null,
+      items,
+    };
+  } catch (err) {
+    logger.error(`通义千问 VL 出库发料单返回不是合法 JSON: ${(err as Error).message}\n原始返回: ${content}`);
+    return emptyOutboundIssueResult();
   }
 }
 

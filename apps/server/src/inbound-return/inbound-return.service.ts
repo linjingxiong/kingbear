@@ -18,6 +18,7 @@ export interface InboundReturnListItem {
   productId: string | null;
   sku: string;
   name: string;
+  materialName?: string;
   weightJin: number;
   unitWeightG: number;
   qtyDeclared: number | null;
@@ -63,6 +64,11 @@ export class InboundReturnService {
    * 只返回识别结果，不建记录 */
   recognize(imagePath: string) {
     return this.ocr.recognizeInboundImage(imagePath);
+  }
+
+  /** 发料单识别的是原材料（物料名称 + 重量），跟退货完全不同的识别模板，只返回识别结果，不建记录 */
+  recognizeIssue(imagePath: string) {
+    return this.ocr.recognizeOutboundIssueImage(imagePath);
   }
 
   /** 列表带上玩具厂名称——前端列表页要用到人能看懂的名字，不是裸 id */
