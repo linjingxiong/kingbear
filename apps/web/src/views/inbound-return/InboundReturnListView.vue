@@ -757,7 +757,7 @@ onMounted(async () => {
               </template>
               <span class="col-label">类型</span>
               <span class="col-label">原因</span>
-              <span class="col-label">操作</span>
+              <span class="col-label col-label--sticky">操作</span>
             </div>
             <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
                  产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
@@ -846,7 +846,16 @@ onMounted(async () => {
                 <el-option label="退货" value="return" />
               </el-select>
               <el-input v-model="row.reason" :placeholder="row.kind === 'return' ? '比如：破损/色差' : '选填'" />
-              <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
+              <el-button
+                v-if="dialogMode === 'create'"
+                link
+                type="danger"
+                class="row-action-sticky"
+                :class="{ 'row-action-sticky--duplicate': duplicateRowIndexes.has(idx) }"
+                @click="removeRow(idx)"
+              >
+                删除
+              </el-button>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
@@ -1046,6 +1055,27 @@ onMounted(async () => {
   content: "*";
   color: #f56c6c;
   margin-right: 2px;
+}
+
+/* 列数多的时候（尤其退货那套字段都摊开时）横向要滚动才看得到最后一列，删除按钮
+   跟着滚出视野外找不到了——把"操作"这一列钉在横向滚动容器的右边缘，滚到哪儿都看得见，
+   不用先划到最右边才能删一行 */
+.col-label--sticky {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  padding-left: 6px;
+}
+
+.row-action-sticky {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  padding-left: 6px !important;
+}
+
+.row-action-sticky--duplicate {
+  background: #fef0f0;
 }
 
 /* 窄屏放不下两栏，图片挪到上面、明细挪到下面各占整行，图片钉住那套逻辑
