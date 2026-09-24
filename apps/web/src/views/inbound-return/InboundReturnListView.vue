@@ -608,9 +608,15 @@ onMounted(async () => {
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="dialogMode === 'create' ? '新增出库单' : '编辑出库单'" width="min(980px, 95vw)">
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
-        <el-form-item v-if="form.imageUrl" label="出库单">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="dialogMode === 'create' ? '新增出库单' : '编辑出库单'"
+      :width="form.imageUrl ? 'min(1360px, 97vw)' : 'min(980px, 95vw)'"
+    >
+      <!-- 识别不准的时候要对着原图逐行核对，图片跟货号明细分两栏：图片这一栏钉在左边不跟着动，
+           右边的明细自己滚，不会出现"看一眼图片、往下滚一下、图片就跑没了"的问题 -->
+      <div class="dialog-body" :class="{ 'dialog-body--split': form.imageUrl }">
+        <div v-if="form.imageUrl" class="image-col">
           <div
             class="slip-frame"
             :class="{ 'slip-frame--zoomed': slipZoomLevel > 1, 'slip-frame--dragging': slipDragging }"
@@ -620,16 +626,19 @@ onMounted(async () => {
           >
             <img :src="form.imageUrl" class="slip-preview-img" :style="slipStyle" draggable="false" />
           </div>
-        </el-form-item>
-        <el-form-item label="玩具厂" prop="factoryId">
-          <el-select v-model="form.factoryId" filterable style="width: 100%" @change="onFactoryChange">
-            <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="出库日期" prop="returnDate">
-          <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="货号明细">
+          <div class="slip-hint">滚轮缩放、拖拽平移，对着原图核对识别结果</div>
+        </div>
+
+        <el-form ref="formRef" :model="form" :rules="rules" label-width="90px" class="fields-col">
+          <el-form-item label="玩具厂" prop="factoryId">
+            <el-select v-model="form.factoryId" filterable style="width: 100%" @change="onFactoryChange">
+              <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="出库日期" prop="returnDate">
+            <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+          </el-form-item>
+          <el-form-item label="货号明细">
           <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会
                乱换行错位。重量(斤)/克重(g) 换算出来的"算出数量"直接摆一列常显——跟数量
                对不上就是红色，不用悬浮/点击才能看到，一眼就能核对是不是录错了。
@@ -731,10 +740,11 @@ onMounted(async () => {
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" />
-        </el-form-item>
-      </el-form>
+          <el-form-item label="备注">
+            <el-input v-model="form.remark" type="textarea" :rows="2" />
+          </el-form-item>
+        </el-form>
+      </div>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit">保存</el-button>
@@ -756,20 +766,52 @@ onMounted(async () => {
   cursor: zoom-in;
   vertical-align: middle;
 }
-/* 退货单预览：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互，
+/* 有原图的时候，弹窗分左右两栏：左边图片钉住不动，右边货号明细自己滚——
+   识别不准要对着图片逐行核对时，图片不会跟着滚动条一起跑掉。没有图片（纯手工新增）
+   就还是原来单栏的样子，不用为了对齐两栏硬留一块空白 */
+.dialog-body--split {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.image-col {
+  flex: 0 0 460px;
+  position: sticky;
+  top: 0;
+}
+
+.fields-col {
+  flex: 1;
+  min-width: 0;
+  /* 右边这一栏自己滚，弹窗本身不用跟着变得超长——图片始终留在视口里 */
+  max-height: 75vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.slip-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
+}
+
+/* 出库单预览：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互，
    固定尺寸的框 + overflow:hidden 裁掉超出部分，交互事件绑在框上（不是图片本身）——
-   图片实际渲染尺寸经常比框小，事件只挂图片上的话空白区域滚轮/拖拽会没反应 */
+   图片实际渲染尺寸经常比框小，事件只挂图片上的话空白区域滚轮/拖拽会没反应。
+   分栏之后图片单独占一整列，尺寸比原来单栏挤在表单里时大不少，字迹能看得更清楚 */
 .slip-frame {
   position: relative;
   width: 100%;
-  max-width: 560px;
-  height: 220px;
+  height: min(640px, 75vh);
   border: 1px solid #ebeef5;
   border-radius: 4px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #fafafa;
 }
 
 .slip-frame--zoomed {
@@ -868,5 +910,28 @@ onMounted(async () => {
   content: "*";
   color: #f56c6c;
   margin-right: 2px;
+}
+
+/* 窄屏放不下两栏，图片挪到上面、明细挪到下面各占整行，图片钉住那套逻辑
+   在窄屏上意义不大（本来也要整个弹窗一起滚），干脆退回自然排版 */
+@media (max-width: 900px) {
+  .dialog-body--split {
+    flex-direction: column;
+  }
+
+  .image-col {
+    flex-basis: auto;
+    width: 100%;
+    position: static;
+  }
+
+  .fields-col {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .slip-frame {
+    height: 260px;
+  }
 }
 </style>
