@@ -86,6 +86,8 @@ export interface CreateInboundReturnDto {
   reason?: string;
   images?: string[];
   remark?: string;
+  /** 后端查出疑似重复数据会拦一次（409），人工确认过之后带上这个标记再提交一次，跳过检查 */
+  force?: boolean;
 }
 
 export type UpdateInboundReturnDto = Partial<CreateInboundReturnDto>;

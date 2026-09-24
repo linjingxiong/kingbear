@@ -15,6 +15,7 @@ import {
   listCommonMaterialReturns,
   updateCommonMaterialReturn,
 } from "../../api/common-material-return";
+import { submitWithDuplicateConfirm } from "../../utils/duplicate-confirm";
 
 const oemFactories = ref<OemFactory[]>([]);
 const commonMaterials = ref<CommonMaterial[]>([]);
@@ -80,7 +81,7 @@ function openEdit(row: CommonMaterialReturnListItem) {
 async function handleSubmit() {
   await formRef.value?.validate();
   if (dialogMode.value === "create") {
-    await createCommonMaterialReturn(form);
+    await submitWithDuplicateConfirm(form, createCommonMaterialReturn);
   } else if (editingId.value) {
     await updateCommonMaterialReturn(editingId.value, form);
   }

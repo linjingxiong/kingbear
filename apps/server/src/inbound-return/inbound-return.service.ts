@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import type { DuplicateConflictResponse } from '@kingbear/shared';
 import { InboundReturn } from './schemas/inbound-return.schema';
 import { Factory } from '../factory/schemas/factory.schema';
 import { Product } from '../product/schemas/product.schema';
@@ -60,8 +61,33 @@ export class InboundReturnService {
   }
 
   async create(dto: CreateInboundReturnDto) {
+    if (!dto.force) {
+      const existing = await this.findDuplicate(dto);
+      if (existing) {
+        const label = dto.kind === 'issue' ? `物料「${existing.materialName}」` : `货号「${existing.sku}」`;
+        throw new ConflictException({
+          message: `同一个玩具厂、同一天、同样的${label}、同样的量，已经录过一条了，是不是重复录入了？`,
+          duplicateType: 'item',
+          conflictCodes: [existing.returnDate.toISOString().slice(0, 10)],
+        } satisfies DuplicateConflictResponse);
+      }
+    }
     const factoryPrice = await this.resolveFactoryPrice(dto.productId, dto.factoryPrice ?? 0);
     return this.returnModel.create({ ...dto, factoryPrice, amount: dto.qty * factoryPrice });
+  }
+
+  /**
+   * 出库单查重：发料按"物料名称+重量"比对（原材料没有货号），退货按"货号+数量"比对
+   *（跟入库单的查重同一个口径：数量比重量/克重稳定，不比对克重）。同一个玩具厂、同一天，
+   * 只跟这条最新记录撞上就算疑似重复——不管新建时是不是同一批一起提交的。
+   */
+  private async findDuplicate(dto: CreateInboundReturnDto) {
+    const { start, end } = dayRange(dto.returnDate);
+    const query =
+      dto.kind === 'issue'
+        ? { kind: 'issue', factoryId: dto.factoryId, materialName: (dto.materialName ?? '').trim(), weightJin: dto.weightJin }
+        : { kind: { $ne: 'issue' }, factoryId: dto.factoryId, sku: dto.sku, qty: dto.qty };
+    return this.returnModel.findOne({ ...query, returnDate: { $gte: start, $lt: end } } as never);
   }
 
   /** 退货单跟入库单长得一样（货号/名称/重量/克重/数量），直接复用入库单的识别，
@@ -124,4 +150,12 @@ export class InboundReturnService {
     if (!record) throw new NotFoundException('退货记录不存在');
     return { success: true };
   }
+}
+
+/** 某一天的 [00:00, 次日00:00) 区间，用于按天比对是不是"同一天"录入的——跟入库单查重同一个算法 */
+function dayRange(dateStr: string) {
+  const d = new Date(dateStr);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  return { start, end };
 }

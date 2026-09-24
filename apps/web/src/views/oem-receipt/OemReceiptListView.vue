@@ -20,6 +20,7 @@ import { listCommonMaterials } from "../../api/common-material";
 import { createCommonMaterialReturn } from "../../api/common-material-return";
 import { createOemReceipt, deleteOemReceipt, listOemReceipts, recognizeOemReceipt, updateOemReceipt } from "../../api/oem-receipt";
 import { useImageZoomPan } from "../../composables/useImageZoomPan";
+import { submitWithDuplicateConfirm } from "../../utils/duplicate-confirm";
 
 // 回收单预览图：滚轮缩放 + 拖拽平移，跟入库确认页单据图片那套交互一样
 // （模板里 ref 只有作为顶层 setup 绑定才会自动解包，所以这里解构出来，不要整个对象一起传）
@@ -327,7 +328,7 @@ async function handleSubmit() {
         remark: form.remark,
         images: form.imageUrl ? [form.imageUrl] : [],
       };
-      await createOemReceipt(dto);
+      await submitWithDuplicateConfirm(dto, createOemReceipt);
     }
   } else if (editingId.value) {
     const row = valid[0];
@@ -347,12 +348,15 @@ async function handleSubmit() {
   if (dialogMode.value === "create") {
     const validCommon = form.commonRows.filter((r) => r.commonMaterialName && r.qty > 0);
     for (const row of validCommon) {
-      await createCommonMaterialReturn({
-        oemFactoryId: form.oemFactoryId,
-        commonMaterialName: row.commonMaterialName,
-        qty: row.qty,
-        returnedDate: form.receivedDate,
-      });
+      await submitWithDuplicateConfirm(
+        {
+          oemFactoryId: form.oemFactoryId,
+          commonMaterialName: row.commonMaterialName,
+          qty: row.qty,
+          returnedDate: form.receivedDate,
+        },
+        createCommonMaterialReturn,
+      );
     }
   }
 

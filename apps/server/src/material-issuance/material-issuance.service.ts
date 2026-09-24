@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import type { DuplicateConflictResponse } from '@kingbear/shared';
 import { MaterialIssuance } from './schemas/material-issuance.schema';
 import { OemFactory } from '../oem-factory/schemas/oem-factory.schema';
 import { ProductGroup } from '../product-group/schemas/product-group.schema';
@@ -35,7 +36,23 @@ export class MaterialIssuanceService {
     @Inject(OCR_PROVIDER) private readonly ocr: OcrProvider,
   ) {}
 
-  create(dto: CreateMaterialIssuanceDto) {
+  async create(dto: CreateMaterialIssuanceDto) {
+    if (!dto.force) {
+      const { start, end } = dayRange(dto.issuedDate);
+      const existing = await this.issuanceModel.findOne({
+        oemFactoryId: dto.oemFactoryId,
+        materialName: dto.materialName.trim(),
+        qty: dto.qty,
+        issuedDate: { $gte: start, $lt: end },
+      } as never);
+      if (existing) {
+        throw new ConflictException({
+          message: `同一个代工厂、同一天、同样的物料「${dto.materialName}」、同样的数量，已经录过一条了，是不是重复录入了？`,
+          duplicateType: 'item',
+          conflictCodes: [existing.issuedDate.toISOString().slice(0, 10)],
+        } satisfies DuplicateConflictResponse);
+      }
+    }
     return this.issuanceModel.create(dto);
   }
 
@@ -95,4 +112,12 @@ export class MaterialIssuanceService {
     if (!record) throw new NotFoundException('发料记录不存在');
     return { success: true };
   }
+}
+
+/** 某一天的 [00:00, 次日00:00) 区间，用于按天比对是不是"同一天"录入的——跟入库单查重同一个算法 */
+function dayRange(dateStr: string) {
+  const d = new Date(dateStr);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  return { start, end };
 }

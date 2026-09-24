@@ -21,6 +21,7 @@ import {
   updateMaterialIssuance,
 } from "../../api/material-issuance";
 import { useImageZoomPan } from "../../composables/useImageZoomPan";
+import { submitWithDuplicateConfirm } from "../../utils/duplicate-confirm";
 
 // 发料单预览图：滚轮缩放 + 拖拽平移，跟入库确认页单据图片那套交互一样
 // （模板里 ref 只有作为顶层 setup 绑定才会自动解包，所以这里解构出来，不要整个对象一起传）
@@ -279,7 +280,7 @@ async function handleSubmit() {
         imageUrl: form.imageUrl || undefined,
         ...(isCommon ? {} : { productGroupId: form.productGroupId }),
       };
-      await createMaterialIssuance(dto);
+      await submitWithDuplicateConfirm(dto, createMaterialIssuance);
     }
   } else if (editingId.value) {
     const row = valid[0];

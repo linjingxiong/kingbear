@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import type { DuplicateConflictResponse } from '@kingbear/shared';
 import { OemReceipt } from './schemas/oem-receipt.schema';
 import { OemFactory } from '../oem-factory/schemas/oem-factory.schema';
 import { Product } from '../product/schemas/product.schema';
@@ -38,7 +39,24 @@ export class OemReceiptService {
     @Inject(OCR_PROVIDER) private readonly ocr: OcrProvider,
   ) {}
 
-  create(dto: CreateOemReceiptDto) {
+  async create(dto: CreateOemReceiptDto) {
+    if (!dto.force) {
+      const { start, end } = dayRange(dto.receivedDate);
+      const existing = await this.receiptModel.findOne({
+        oemFactoryId: dto.oemFactoryId,
+        productId: dto.productId,
+        qty: dto.qty,
+        receivedDate: { $gte: start, $lt: end },
+      } as never);
+      if (existing) {
+        const product = await this.productModel.findById(dto.productId).lean();
+        throw new ConflictException({
+          message: `同一个代工厂、同一天、同样的货号「${product?.sku ?? dto.productId}」、同样的数量，已经录过一条了，是不是重复录入了？`,
+          duplicateType: 'item',
+          conflictCodes: [existing.receivedDate.toISOString().slice(0, 10)],
+        } satisfies DuplicateConflictResponse);
+      }
+    }
     return this.receiptModel.create(dto);
   }
 
@@ -85,4 +103,12 @@ export class OemReceiptService {
     if (!record) throw new NotFoundException('回收记录不存在');
     return { success: true };
   }
+}
+
+/** 某一天的 [00:00, 次日00:00) 区间，用于按天比对是不是"同一天"录入的——跟入库单查重同一个算法 */
+function dayRange(dateStr: string) {
+  const d = new Date(dateStr);
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  return { start, end };
 }

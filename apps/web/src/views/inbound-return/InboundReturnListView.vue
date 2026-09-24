@@ -14,6 +14,7 @@ import {
 import { listFactories } from "../../api/factory";
 import { listProductsByFactory } from "../../api/product";
 import { listProductGroupsByFactory, updateProductGroup } from "../../api/product-group";
+import { submitWithDuplicateConfirm } from "../../utils/duplicate-confirm";
 import {
   createInboundReturn,
   deleteInboundReturn,
@@ -468,7 +469,7 @@ async function handleSubmit() {
         remark: form.remark,
         images: form.imageUrl ? [form.imageUrl] : [],
       };
-      await createInboundReturn(dto);
+      await submitWithDuplicateConfirm(dto, createInboundReturn);
     }
   } else if (editingId.value) {
     const row = valid[0];
