@@ -133,9 +133,53 @@ function blankRow(kind: OutboundKind = "issue"): RowItem {
 // 全都是发料的时候，表单里那几列直接不显示，省得看着一堆用不上的"-"
 const hasReturnRows = computed(() => form.rows.some((r) => r.kind === "return"));
 
+/**
+ * 这一批里有没有手滑录重的：同样是发料，物料名称+重量一样；同样是退货，货号+数量一样，
+ * 大概率是同一行被多录了一遍（比如拍照识别把手写的一行拆成两行，或者手动加行的时候点重了）。
+ * 这只查"这批还没保存的行之间"有没有重复，跟保存时后端查"是不是跟数据库里已存的记录重复"
+ * 是两回事，互不替代——这个能在动手保存之前就看出来，不用等提交了才知道。
+ */
+interface DuplicateGroup {
+  key: string;
+  label: string;
+  /** 命中这一组重复的行号（从 0 开始），用来标红对应的行 */
+  indexes: number[];
+}
+const duplicateGroups = computed<DuplicateGroup[]>(() => {
+  const groups = new Map<string, DuplicateGroup>();
+  form.rows.forEach((row, idx) => {
+    let key: string;
+    let label: string;
+    if (row.kind === "issue") {
+      const name = row.materialName.trim();
+      if (!name || row.weightJin <= 0) return;
+      key = `issue:${name}:${row.weightJin}`;
+      label = `发料 · 物料「${name}」· 重量 ${row.weightJin} 斤`;
+    } else {
+      if (!row.productId || row.weightJin <= 0) return;
+      const product = productsByFactory.value.find((p) => p.id === row.productId);
+      const qty = qtyFinal(row);
+      key = `return:${row.productId}:${qty}`;
+      label = `退货 · 货号「${product?.sku ?? "未知"}」· 数量 ${qty}`;
+    }
+    const g = groups.get(key) ?? { key, label, indexes: [] };
+    g.indexes.push(idx);
+    groups.set(key, g);
+  });
+  return [...groups.values()].filter((g) => g.indexes.length > 1);
+});
+const duplicateRowIndexes = computed(() => new Set(duplicateGroups.value.flatMap((g) => g.indexes)));
+
 // 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
 function onRowProductGroupChange(row: RowItem) {
   row.materialName = "";
+  // 一批发料大多数是同一个产品，记住这次选的，后面新增的行直接带上、不用每行重选；
+  // 顺手把这一批里还没选产品的其他行也一起填上（比如拍照识别一次性出来一堆空产品的行），
+  // 已经手动选过别的产品的行不动，不会覆盖掉手动选择
+  lastIssueProductGroupId.value = row.productGroupId;
+  for (const r of form.rows) {
+    if (r !== row && r.kind === "issue" && !r.productGroupId) r.productGroupId = row.productGroupId;
+  }
 }
 
 function qtyCalculated(row: RowItem) {
@@ -163,6 +207,9 @@ const form = reactive({
   rows: [] as RowItem[],
 });
 const uploading = ref(false);
+// 记着这批发料最近一次选的产品，新增行、批量识别出来的空产品行都直接带上这个默认值——
+// 不用同一个产品在每一行都重选一遍；每次重新开一张新出库单（resetForm）就清空，不会带到下一张单上
+const lastIssueProductGroupId = ref("");
 
 const rules = {
   factoryId: [{ required: true, message: "请选择玩具厂", trigger: "change" }],
@@ -265,9 +312,11 @@ function resetForm() {
     imageUrl: "",
     rows: [],
   });
+  lastIssueProductGroupId.value = "";
 }
 function addRow() {
-  form.rows.push(blankRow());
+  // 新增的行直接带上这批最近选的产品，省得同一个产品每行都要重选一遍
+  form.rows.push({ ...blankRow(), productGroupId: lastIssueProductGroupId.value });
 }
 function removeRow(i: number) {
   form.rows.splice(i, 1);
@@ -644,6 +693,12 @@ onMounted(async () => {
                对不上就是红色，不用悬浮/点击才能看到，一眼就能核对是不是录错了。
                克重(g)/数量/算出数量只有退货用得到，这一批要是全是发料，这三列就不显示，
                不用看一堆用不上的"-" -->
+          <el-alert v-if="duplicateGroups.length" type="warning" show-icon :closable="false" class="dup-alert">
+            <template #title>这批里有 {{ duplicateGroups.length }} 组疑似重复，对应的行已经标红</template>
+            <div v-for="g in duplicateGroups" :key="g.key" class="dup-item">
+              {{ g.label }} — 第 {{ g.indexes.map((i) => i + 1).join("、") }} 行
+            </div>
+          </el-alert>
           <div class="rows-editor">
             <div class="rows-grid rows-grid--header" :class="{ 'rows-grid--compact': !hasReturnRows }">
               <span class="col-label">产品</span>
@@ -665,7 +720,7 @@ onMounted(async () => {
               v-for="(row, idx) in form.rows"
               :key="idx"
               class="rows-grid"
-              :class="{ 'rows-grid--compact': !hasReturnRows }"
+              :class="{ 'rows-grid--compact': !hasReturnRows, 'rows-grid--duplicate': duplicateRowIndexes.has(idx) }"
             >
               <el-select
                 v-if="row.kind === 'issue'"
@@ -894,6 +949,24 @@ onMounted(async () => {
 
 .rows-grid--header {
   margin-bottom: 4px;
+}
+
+.dup-alert {
+  margin-bottom: 10px;
+}
+
+.dup-item {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 这一行跟这批里的另一行撞了（同样的物料/货号+同样的量），整行标红，一眼就能看出
+   是手滑录重了——外扩一点内边距，不然红色只会紧贴着输入框边缘，很难注意到 */
+.rows-grid--duplicate {
+  background: #fef0f0;
+  outline: 2px solid #f89898;
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .calc-qty {
