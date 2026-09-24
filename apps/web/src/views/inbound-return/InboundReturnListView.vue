@@ -59,6 +59,49 @@ function kindLabel(kind: OutboundKind) {
 const kindFilter = ref<"" | OutboundKind>("");
 const filteredList = computed(() => (kindFilter.value ? list.value.filter((r) => r.kind === kindFilter.value) : list.value));
 
+/**
+ * 已经保存的记录里有没有疑似重复的——跟录入时"这一批还没提交的行互相比对"、保存时"跟数据库
+ * 已有记录比对"是两回事：这个是把已经存进去的全部记录拉出来，两两比对一遍，不管是什么时候、
+ * 怎么录进去的（哪怕是当时确认了"强制保存"的），只要现在看数据本身样子一样，就标出来。
+ * 判断口径跟前两道查重一致：发料按"同厂+同天+同物料名+同重量"，退货按"同厂+同天+同货号+同数量"。
+ */
+interface ListDuplicateGroup {
+  ids: string[];
+  label: string;
+}
+const listDuplicateGroups = computed<ListDuplicateGroup[]>(() => {
+  const groups = new Map<string, ListDuplicateGroup>();
+  for (const r of list.value) {
+    const day = (r.returnDate ?? "").slice(0, 10);
+    if (!day) continue;
+    let key: string;
+    let label: string;
+    if (r.kind === "issue") {
+      const name = (r.materialName || r.name || "").trim();
+      if (!name) continue;
+      key = `issue:${r.factoryId}:${day}:${name}:${r.weightJin}`;
+      label = `${r.factoryName} · ${day} · 发料 · 物料「${name}」· 重量 ${r.weightJin} 斤`;
+    } else {
+      if (!r.sku) continue;
+      key = `return:${r.factoryId}:${day}:${r.sku}:${r.qty}`;
+      label = `${r.factoryName} · ${day} · 退货 · 货号「${r.sku}」· 数量 ${r.qty}`;
+    }
+    const g = groups.get(key) ?? { ids: [], label };
+    g.ids.push(r.id);
+    groups.set(key, g);
+  }
+  return [...groups.values()].filter((g) => g.ids.length > 1);
+});
+/** 记录 id → 属于哪一组重复（拿组内的描述文案给 tooltip 用） */
+const duplicateRecordMap = computed(() => {
+  const m = new Map<string, string>();
+  for (const g of listDuplicateGroups.value) for (const id of g.ids) m.set(id, g.label);
+  return m;
+});
+function rowClassName({ row }: { row: InboundReturnListItem }) {
+  return duplicateRecordMap.value.has(row.id) ? "row-is-duplicate" : "";
+}
+
 // 退货货号只能是选中的这个玩具厂自己的产品，换厂要重新拉一遍
 async function loadProducts(factoryId: string) {
   productsByFactory.value = factoryId ? await listProductsByFactory(factoryId) : [];
@@ -588,13 +631,16 @@ onMounted(async () => {
       </template>
     </el-alert>
 
-    <el-table v-loading="loading" :data="filteredList" stripe size="small">
+    <el-table v-loading="loading" :data="filteredList" stripe size="small" :row-class-name="rowClassName">
       <el-table-column label="出库日期" width="120">
         <template #default="{ row }">{{ (row.returnDate ?? "").slice(0, 10) }}</template>
       </el-table-column>
-      <el-table-column label="类型" width="80" align="center">
+      <el-table-column label="类型" width="105" align="center">
         <template #default="{ row }">
           <el-tag :type="row.kind === 'return' ? 'danger' : 'primary'" size="small" effect="plain">{{ kindLabel(row.kind) }}</el-tag>
+          <el-tooltip v-if="duplicateRecordMap.has(row.id)" :content="`疑似重复：${duplicateRecordMap.get(row.id)}`">
+            <el-icon class="diff-icon"><WarningFilled /></el-icon>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column prop="factoryName" label="玩具厂" width="140" />
@@ -906,6 +952,13 @@ onMounted(async () => {
   color: #f56c6c;
   vertical-align: middle;
   cursor: help;
+  margin-left: 4px;
+}
+
+/* 列表里已经保存的记录，如果跟另一条疑似重复，整行标红——不只是录入时的弹窗，
+   历史数据本身也要一眼看出来（哪怕当时是强制保存过的） */
+:deep(.row-is-duplicate td) {
+  background-color: #fef0f0 !important;
 }
 .diff-icon--big {
   color: #f56c6c;
