@@ -32,6 +32,8 @@ export interface InboundReturn {
   /** 物料名称，发料专用，跟 name 是同一个值——加这个字段只是让读代码的人一看就知道
    * 这是"物料"不是"工序"，query/展示上跟 name 二选一都行 */
   materialName?: string;
+  /** 这批物料属于哪个产品（ProductGroup），发料专用、选填 */
+  productGroupId?: string | null;
   /** 重量（斤）：退货是这一批货的重量，发料是这批原料的重量，两种都用得到 */
   weightJin: number;
   /** 单个克重（g），只有退货用得到（用来从重量换算件数） */
@@ -57,9 +59,10 @@ export interface InboundReturn {
   updatedAt: string;
 }
 
-/** 列表展示用，带上玩具厂名称，不用前端再拿 id 反查一遍 */
+/** 列表展示用，带上玩具厂名称（和发料行的产品名称，没选产品就是 undefined），不用前端再拿 id 反查一遍 */
 export interface InboundReturnListItem extends InboundReturn {
   factoryName: string;
+  productGroupName?: string;
 }
 
 export interface CreateInboundReturnDto {
@@ -73,6 +76,7 @@ export interface CreateInboundReturnDto {
   /** 退货是工序名称，发料是物料名称 */
   name?: string;
   materialName?: string;
+  productGroupId?: string | null;
   weightJin?: number;
   unitWeightG?: number;
   qtyDeclared?: number | null;

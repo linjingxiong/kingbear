@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { InboundReturn } from './schemas/inbound-return.schema';
 import { Factory } from '../factory/schemas/factory.schema';
 import { Product } from '../product/schemas/product.schema';
+import { ProductGroup } from '../product-group/schemas/product-group.schema';
 import { OCR_PROVIDER } from '../ocr/ocr.module';
 import type { OcrProvider } from '../ocr/ocr.types';
 import { CreateInboundReturnDto } from './dto/create-inbound-return.dto';
@@ -19,6 +20,7 @@ export interface InboundReturnListItem {
   sku: string;
   name: string;
   materialName?: string;
+  productGroupId?: string | null;
   weightJin: number;
   unitWeightG: number;
   qtyDeclared: number | null;
@@ -33,6 +35,7 @@ export interface InboundReturnListItem {
   createdAt?: Date;
   updatedAt?: Date;
   factoryName: string;
+  productGroupName?: string;
 }
 
 @Injectable()
@@ -41,6 +44,7 @@ export class InboundReturnService {
     @InjectModel(InboundReturn.name) private readonly returnModel: Model<InboundReturn>,
     @InjectModel(Factory.name) private readonly factoryModel: Model<Factory>,
     @InjectModel(Product.name) private readonly productModel: Model<Product>,
+    @InjectModel(ProductGroup.name) private readonly groupModel: Model<ProductGroup>,
     @Inject(OCR_PROVIDER) private readonly ocr: OcrProvider,
   ) {}
 
@@ -71,20 +75,28 @@ export class InboundReturnService {
     return this.ocr.recognizeOutboundIssueImage(imagePath);
   }
 
-  /** 列表带上玩具厂名称——前端列表页要用到人能看懂的名字，不是裸 id */
+  /** 列表带上玩具厂名称、发料行的产品名称——前端列表页要用到人能看懂的名字，不是裸 id */
   async findAll(): Promise<InboundReturnListItem[]> {
     const list = await this.returnModel.find().sort({ returnDate: -1, createdAt: -1 }).lean();
     const factories = await this.factoryModel.find().lean();
     const factoryNameMap = new Map(factories.map((f) => [String(f._id), f.name]));
 
+    const groupIds = [...new Set(list.map((r) => (r.productGroupId ? String(r.productGroupId) : '')).filter(Boolean))];
+    const groupNameMap = new Map<string, string>();
+    if (groupIds.length) {
+      for (const g of await this.groupModel.find({ _id: { $in: groupIds } }).lean()) groupNameMap.set(String(g._id), g.name);
+    }
+
     // .lean() 不会套 schema 的 default，老记录没有 kind 字段，这里手动补成 "return"
-    return list.map(({ _id, __v, factoryId, productId, kind, ...rest }) => ({
+    return list.map(({ _id, __v, factoryId, productId, productGroupId, kind, ...rest }) => ({
       ...rest,
       id: String(_id),
       kind: kind ?? 'return',
       factoryId: String(factoryId),
       productId: productId ? String(productId) : null,
+      productGroupId: productGroupId ? String(productGroupId) : null,
       factoryName: factoryNameMap.get(String(factoryId)) ?? '未知玩具厂',
+      productGroupName: productGroupId ? groupNameMap.get(String(productGroupId)) : undefined,
     }));
   }
 

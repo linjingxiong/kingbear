@@ -26,6 +26,11 @@ export class CreateInboundReturnDto {
   @IsString()
   materialName?: string;
 
+  // 发料选填：这批料是哪个产品用的
+  @IsOptional()
+  @IsMongoId()
+  productGroupId?: string | null;
+
   @IsOptional()
   @IsNumber()
   @Min(0)

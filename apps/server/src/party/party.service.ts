@@ -224,6 +224,13 @@ export class PartyService {
       this.outboundModel.find({ factoryId: idIn(id), ...inRange('returnDate', range) } as never).lean(),
     ]);
 
+    // 发料行选了产品的话，批量查一下产品名称，展示用（跟代工厂物料发放同一个做法）
+    const groupIds = [...new Set(outbounds.map((r) => (r.productGroupId ? String(r.productGroupId) : '')).filter(Boolean))];
+    const groupName = new Map<string, string>();
+    if (groupIds.length) {
+      for (const g of await this.groupModel.find({ _id: { $in: groupIds } }).lean()) groupName.set(String(g._id), g.name);
+    }
+
     const rows: PartyLedgerRow[] = [];
     for (const r of inbounds) {
       r.items.forEach((item, i) => {
@@ -263,6 +270,7 @@ export class PartyService {
         itemKey: isIssue ? r.materialName || r.name : r.sku,
         itemName: isIssue ? r.materialName || r.name : r.name,
         sku: isIssue ? undefined : r.sku,
+        group: isIssue && r.productGroupId ? groupName.get(String(r.productGroupId)) : undefined,
         qty: r.qty,
         weightJin: r.weightJin,
         unitWeightG: isIssue ? undefined : r.unitWeightG,

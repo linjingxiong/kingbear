@@ -38,6 +38,11 @@ export class InboundReturn extends Document {
   @Prop()
   materialName?: string;
 
+  /** 这批物料属于哪个产品（ProductGroup），发料专用、选填——不选也能记，
+   * 只是不知道具体是哪个产品用的料 */
+  @Prop({ type: Types.ObjectId, ref: 'ProductGroup', default: null, index: true })
+  productGroupId?: Types.ObjectId | null;
+
   /** 重量（斤） */
   @Prop({ default: 0 })
   weightJin: number;

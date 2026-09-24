@@ -9,9 +9,11 @@ import {
   type InboundReturnListItem,
   type OutboundKind,
   type Product,
+  type ProductGroup,
 } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { listProductsByFactory } from "../../api/product";
+import { listProductGroupsByFactory, updateProductGroup } from "../../api/product-group";
 import {
   createInboundReturn,
   deleteInboundReturn,
@@ -41,6 +43,9 @@ const {
 
 const factories = ref<FactoryListItem[]>([]);
 const productsByFactory = ref<Product[]>([]);
+// 发料这批物料是给这个玩具厂哪个产品用的（选填），选了产品，物料名称就能从这个产品的
+// 物料清单里下拉选，不用每次手打——跟这个产品自己的"产品管理"页是同一份物料清单
+const productGroups = ref<ProductGroup[]>([]);
 const list = ref<InboundReturnListItem[]>([]);
 const loading = ref(false);
 
@@ -56,6 +61,26 @@ const filteredList = computed(() => (kindFilter.value ? list.value.filter((r) =>
 // 退货货号只能是选中的这个玩具厂自己的产品，换厂要重新拉一遍
 async function loadProducts(factoryId: string) {
   productsByFactory.value = factoryId ? await listProductsByFactory(factoryId) : [];
+}
+
+async function loadProductGroups(factoryId: string) {
+  productGroups.value = factoryId ? await listProductGroupsByFactory(factoryId) : [];
+}
+
+/** 这一行选了产品，物料下拉就是这个产品的物料清单；没选产品就没有下拉候选，还是能手打 */
+function materialOptionsFor(row: RowItem): string[] {
+  return productGroups.value.find((g) => g.id === row.productGroupId)?.materials.map((m) => m.name) ?? [];
+}
+
+/** 发料行填的物料名称，如果这个产品的物料清单里还没有，保存时顺手记进这个产品的物料清单，
+ * 下次同一个产品就能直接选了——跟"资产类型"名录是同一个思路 */
+async function ensureMaterialInGroup(row: RowItem) {
+  if (row.kind !== "issue" || !row.productGroupId) return;
+  const group = productGroups.value.find((g) => g.id === row.productGroupId);
+  const name = row.materialName.trim();
+  if (!group || !name || group.materials.some((m) => m.name === name)) return;
+  const updated = await updateProductGroup(group.id, { materials: [...group.materials, { name, unit: "" }] });
+  Object.assign(group, updated);
 }
 
 async function load() {
@@ -76,6 +101,8 @@ type RowItem = {
   productId: string;
   /** 发料专用：物料名称，原材料没有货号 */
   materialName: string;
+  /** 发料专用、选填：这批料是哪个产品用的 */
+  productGroupId: string;
   /** 重量(斤)：两种类型都用得到 */
   weightJin: number;
   /** 退货专用：单个克重(g)，用来从重量换算件数 */
@@ -88,7 +115,26 @@ type RowItem = {
 
 // 新增一行默认"发料"：出库单里大部分是发料、偶尔夹几行退货，退货的那几行手动改一下
 function blankRow(kind: OutboundKind = "issue"): RowItem {
-  return { kind, productId: "", materialName: "", weightJin: 0, unitWeightG: 0, qtyDeclared: null, reason: "", ocrName: "" };
+  return {
+    kind,
+    productId: "",
+    materialName: "",
+    productGroupId: "",
+    weightJin: 0,
+    unitWeightG: 0,
+    qtyDeclared: null,
+    reason: "",
+    ocrName: "",
+  };
+}
+
+// 出库单里的行是发料还是退货混着——发料要看是不是全都不需要克重/数量这些字段，
+// 全都是发料的时候，表单里那几列直接不显示，省得看着一堆用不上的"-"
+const hasReturnRows = computed(() => form.rows.some((r) => r.kind === "return"));
+
+// 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
+function onRowProductGroupChange(row: RowItem) {
+  row.materialName = "";
 }
 
 function qtyCalculated(row: RowItem) {
@@ -134,7 +180,15 @@ function formHasContent() {
     form.remark ||
     form.imageUrl ||
     form.rows.some(
-      (r) => r.productId || r.materialName || r.weightJin > 0 || r.unitWeightG > 0 || r.qtyDeclared || r.reason || r.ocrName,
+      (r) =>
+        r.productId ||
+        r.materialName ||
+        r.productGroupId ||
+        r.weightJin > 0 ||
+        r.unitWeightG > 0 ||
+        r.qtyDeclared ||
+        r.reason ||
+        r.ocrName,
     )
   );
 }
@@ -222,6 +276,7 @@ function openCreate() {
   dialogMode.value = "create";
   editingId.value = null;
   productsByFactory.value = [];
+  productGroups.value = [];
   resetForm();
   addRow();
   dialogVisible.value = true;
@@ -230,7 +285,7 @@ function openCreate() {
 async function openEdit(row: InboundReturnListItem) {
   dialogMode.value = "edit";
   editingId.value = row.id;
-  await loadProducts(row.factoryId);
+  await Promise.all([loadProducts(row.factoryId), loadProductGroups(row.factoryId)]);
   Object.assign(form, {
     factoryId: row.factoryId,
     returnDate: (row.returnDate ?? "").slice(0, 10),
@@ -241,6 +296,7 @@ async function openEdit(row: InboundReturnListItem) {
         kind: row.kind ?? "return",
         productId: row.productId ?? "",
         materialName: row.materialName ?? "",
+        productGroupId: row.productGroupId ?? "",
         weightJin: row.weightJin ?? 0,
         unitWeightG: row.unitWeightG ?? 0,
         qtyDeclared: row.qtyDeclared ?? row.qty,
@@ -252,12 +308,14 @@ async function openEdit(row: InboundReturnListItem) {
   dialogVisible.value = true;
 }
 
-// 换玩具厂时，原来选的货号可能不属于新厂，清掉并重新拉一遍这个厂的产品
+// 换玩具厂时，原来选的货号/产品可能不属于新厂，清掉并重新拉一遍这个厂的产品和产品清单
 async function onFactoryChange() {
-  await loadProducts(form.factoryId);
-  const ids = new Set(productsByFactory.value.map((p) => p.id));
+  await Promise.all([loadProducts(form.factoryId), loadProductGroups(form.factoryId)]);
+  const productIds = new Set(productsByFactory.value.map((p) => p.id));
+  const groupIds = new Set(productGroups.value.map((g) => g.id));
   for (const row of form.rows) {
-    if (row.productId && !ids.has(row.productId)) row.productId = "";
+    if (row.productId && !productIds.has(row.productId)) row.productId = "";
+    if (row.productGroupId && !groupIds.has(row.productGroupId)) row.productGroupId = "";
   }
 }
 
@@ -292,7 +350,8 @@ async function onReturnOcrUpload(options: UploadRequestOptions) {
       const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
       if (f) {
         form.factoryId = f.id;
-        await loadProducts(f.id);
+        // 产品清单也一起拉一下——万一某一行手动改成"发料"，产品下拉马上就有得选
+        await Promise.all([loadProducts(f.id), loadProductGroups(f.id)]);
       }
     }
     if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
@@ -332,10 +391,11 @@ async function onIssueOcrUpload(options: UploadRequestOptions) {
     if (r.factoryName) {
       const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
       // 发料行不用选货号，这里仍然拉一下这个厂的产品列表——万一某一行手动改成"退货"，
-      // 货号下拉能马上有选项，不用等用户重新碰一下玩具厂选择框才触发加载
+      // 货号下拉能马上有选项，不用等用户重新碰一下玩具厂选择框才触发加载。产品清单也一起拉，
+      // 方便识别完之后逐行补选"这批料是哪个产品的"
       if (f) {
         form.factoryId = f.id;
-        await loadProducts(f.id);
+        await Promise.all([loadProducts(f.id), loadProductGroups(f.id)]);
       }
     }
     if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
@@ -378,6 +438,7 @@ function buildRowFields(row: RowItem) {
     sku: "",
     name: "",
     materialName: row.materialName.trim(),
+    productGroupId: row.productGroupId || null,
     weightJin: row.weightJin,
     unitWeightG: 0,
     qtyDeclared: null,
@@ -393,6 +454,8 @@ async function handleSubmit() {
     ElMessage.warning("请至少填好一行：退货要选货号+填重量(斤)，发料要填物料名称+填重量(斤)");
     return;
   }
+  // 发料行填的物料名称，选了产品但物料清单里还没有的话，顺手记进这个产品的物料清单
+  await Promise.all(valid.map(ensureMaterialInGroup));
 
   if (dialogMode.value === "create") {
     for (const row of valid) {
@@ -485,6 +548,9 @@ onMounted(async () => {
         </template>
       </el-table-column>
       <el-table-column prop="factoryName" label="玩具厂" width="140" />
+      <el-table-column label="产品" width="110" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.kind === "issue" ? row.productGroupName || "-" : "-" }}</template>
+      </el-table-column>
       <el-table-column label="货号" width="100">
         <template #default="{ row }">{{ row.kind === "return" ? row.sku : "-" }}</template>
       </el-table-column>
@@ -565,21 +631,46 @@ onMounted(async () => {
         <el-form-item label="货号明细">
           <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会
                乱换行错位。重量(斤)/克重(g) 换算出来的"算出数量"直接摆一列常显——跟数量
-               对不上就是红色，不用悬浮/点击才能看到，一眼就能核对是不是录错了 -->
+               对不上就是红色，不用悬浮/点击才能看到，一眼就能核对是不是录错了。
+               克重(g)/数量/算出数量只有退货用得到，这一批要是全是发料，这三列就不显示，
+               不用看一堆用不上的"-" -->
           <div class="rows-editor">
-            <div class="rows-grid rows-grid--header">
+            <div class="rows-grid rows-grid--header" :class="{ 'rows-grid--compact': !hasReturnRows }">
+              <span class="col-label">产品</span>
               <span class="col-label">货号 / 物料</span>
               <span class="col-label col-label--required">重量(斤)</span>
-              <span class="col-label">克重(g)</span>
-              <span class="col-label">数量</span>
-              <span class="col-label">算出数量</span>
+              <template v-if="hasReturnRows">
+                <span class="col-label">克重(g)</span>
+                <span class="col-label">数量</span>
+                <span class="col-label">算出数量</span>
+              </template>
               <span class="col-label">类型</span>
               <span class="col-label">原因</span>
               <span class="col-label">操作</span>
             </div>
-            <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，直接打物料名称。
-                 两种字段完全不同，同一列位置按这一行的类型切换控件，8 列不变，跟表头对齐 -->
-            <div v-for="(row, idx) in form.rows" :key="idx" class="rows-grid">
+            <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
+                 产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
+                 保存时顺手记进这个产品的物料清单，下次就有了 -->
+            <div
+              v-for="(row, idx) in form.rows"
+              :key="idx"
+              class="rows-grid"
+              :class="{ 'rows-grid--compact': !hasReturnRows }"
+            >
+              <el-select
+                v-if="row.kind === 'issue'"
+                v-model="row.productGroupId"
+                filterable
+                clearable
+                :disabled="!form.factoryId"
+                placeholder="产品（选填）"
+                style="width: 100%"
+                @change="onRowProductGroupChange(row)"
+              >
+                <el-option v-for="g in productGroups" :key="g.id" :label="g.name" :value="g.id" />
+              </el-select>
+              <span v-else class="muted col-dash">-</span>
+
               <el-select
                 v-if="row.kind === 'return'"
                 v-model="row.productId"
@@ -590,39 +681,43 @@ onMounted(async () => {
               >
                 <el-option v-for="p in productsByFactory" :key="p.id" :label="`${p.sku} · ${p.name}`" :value="p.id" />
               </el-select>
-              <el-input v-else v-model="row.materialName" placeholder="物料名称" />
+              <el-select v-else v-model="row.materialName" filterable allow-create default-first-option placeholder="物料名称" style="width: 100%">
+                <el-option v-for="name in materialOptionsFor(row)" :key="name" :label="name" :value="name" />
+              </el-select>
 
               <el-input-number v-model="row.weightJin" :min="0" :precision="3" controls-position="right" style="width: 100%" />
 
-              <el-input-number
-                v-if="row.kind === 'return'"
-                v-model="row.unitWeightG"
-                :min="0"
-                :precision="3"
-                controls-position="right"
-                style="width: 100%"
-              />
-              <span v-else class="muted col-dash">-</span>
+              <template v-if="hasReturnRows">
+                <el-input-number
+                  v-if="row.kind === 'return'"
+                  v-model="row.unitWeightG"
+                  :min="0"
+                  :precision="3"
+                  controls-position="right"
+                  style="width: 100%"
+                />
+                <span v-else class="muted col-dash">-</span>
 
-              <el-input-number
-                v-if="row.kind === 'return'"
-                v-model="row.qtyDeclared"
-                :min="0"
-                controls-position="right"
-                style="width: 100%"
-              />
-              <span v-else class="muted col-dash">-</span>
+                <el-input-number
+                  v-if="row.kind === 'return'"
+                  v-model="row.qtyDeclared"
+                  :min="0"
+                  controls-position="right"
+                  style="width: 100%"
+                />
+                <span v-else class="muted col-dash">-</span>
 
-              <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，只有退货用得到——发料只按重量记，
-                   没有件数这回事 -->
-              <span
-                v-if="row.kind === 'return'"
-                class="calc-qty"
-                :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }"
-              >
-                {{ qtyCalculated(row) }}
-              </span>
-              <span v-else class="muted col-dash">-</span>
+                <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，只有退货用得到——发料只按重量记，
+                     没有件数这回事 -->
+                <span
+                  v-if="row.kind === 'return'"
+                  class="calc-qty"
+                  :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }"
+                >
+                  {{ qtyCalculated(row) }}
+                </span>
+                <span v-else class="muted col-dash">-</span>
+              </template>
 
               <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对 -->
               <el-select v-model="row.kind" style="width: 100%" :class="{ 'kind-select--return': row.kind === 'return' }">
@@ -716,12 +811,20 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  /* 货号 / 重量 / 克重 / 数量 / 算出数量 / 类型 / 原因 / 操作 */
-  grid-template-columns: 190px 95px 95px 95px 80px 90px 120px 60px;
+  /* 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 类型 / 原因 / 操作——
+     这批里只要还有一行是退货，就用这套完整的 9 列 */
+  grid-template-columns: 130px 180px 95px 95px 95px 80px 90px 120px 60px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  min-width: 880px;
+  min-width: 970px;
+}
+
+/* 这批全是发料，克重/数量/算出数量三列用不上，直接不占地方：
+   产品 / 物料 / 重量 / 类型 / 原因 / 操作，6 列 */
+.rows-grid--compact {
+  grid-template-columns: 160px 220px 100px 90px 140px 60px;
+  min-width: 800px;
 }
 
 /* 选了"退货"的那一行，类型下拉框变红，一眼看出哪几行会从应收里扣钱 */
