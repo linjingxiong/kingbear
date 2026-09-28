@@ -112,20 +112,33 @@ export interface InboundListRow {
 }
 
 /** 入库单相册：按玩具厂/账期筛，不传就是不限 */
+/** 单据相册里的单据种类：入库单 / 出库单（发料+退货都算出库单） */
+export type GalleryKind = "inbound" | "outbound";
+
 export interface InboundGalleryQuery {
   factoryId?: string;
   /** 如 "2026-08"，不传就是所有时间 */
   yearMonth?: string;
+  /** 只看入库单或只看出库单，不传就是两种都要 */
+  kind?: GalleryKind;
 }
 
-/** 相册里的一张图——一条入库单对应一张原始单据照片（手工录入、没拍照的单子不会出现在这里） */
+/**
+ * 相册里的一张图——一张原始单据照片（手工录入、没拍照的单子不会出现在这里）。
+ * 入库单：一条入库单对应一张照片；出库单：同一张照片拆成好几行记录时只算一张。
+ */
 export interface InboundGalleryItem {
+  kind: GalleryKind;
+  /** 入库单是入库单 id；出库单是这张照片对应的第一条出库记录 id */
   recordId: string;
+  /** 入库单号；出库单没有单号，是空字符串 */
   code: string;
   factoryId: string | null;
   factoryName: string;
+  /** 单据日期：入库单是入库日期，出库单是出库日期（字段名沿用没改） */
   inboundDate: string;
   imageUrl: string;
   rotation: number;
-  status: InboundStatus;
+  /** 只有入库单有 */
+  status?: InboundStatus;
 }

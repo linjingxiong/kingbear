@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { readFile } from 'fs/promises';
 import { InboundStatus, QuantitySource, type DuplicateConflictResponse, type InboundGalleryItem, type InboundListRow } from '@kingbear/shared';
 import { InboundRecord } from './schemas/inbound-record.schema';
+import { InboundReturn } from '../inbound-return/schemas/inbound-return.schema';
 import { ConfirmInboundDto } from './dto/confirm-inbound.dto';
 import { SearchInboundDto } from './dto/search-inbound.dto';
 import { InboundGalleryQueryDto } from './dto/inbound-gallery-query.dto';
@@ -18,6 +19,7 @@ import { calculateQuantity, hasQuantityDiff } from '../common/utils/quantity.uti
 export class InboundService {
   constructor(
     @InjectModel(InboundRecord.name) private readonly inboundModel: Model<InboundRecord>,
+    @InjectModel(InboundReturn.name) private readonly outboundModel: Model<InboundReturn>,
     @Inject(OCR_PROVIDER) private readonly ocrProvider: OcrProvider,
     private readonly factoryService: FactoryService,
     private readonly productService: ProductService,
@@ -264,32 +266,71 @@ export class InboundService {
   }
 
   /**
-   * 入库单相册：按玩具厂/账期筛，只要有原始单据照片的记录，像图片文件夹一样浏览——
-   * 不用一条条点进详情才能看图。手工录入没拍照的记录（imageUrl 是空字符串）不出现在这里。
+   * 单据相册：入库单 + 出库单的原始单据照片放在一起，按玩具厂/账期/单据种类筛，像图片文件夹
+   * 一样浏览——不用一条条点进详情才能看图。手工录入没拍照的记录不出现在这里。
+   * 全部按单据日期从早到晚排；出库单同一张照片拆成好几行记录时只出一张图（按图片地址去重）。
    */
   async gallery(query: InboundGalleryQueryDto): Promise<InboundGalleryItem[]> {
-    const filter: FilterQuery<InboundRecord> = { imageUrl: { $ne: '' } };
-    if (query.factoryId) filter.factoryId = new Types.ObjectId(query.factoryId);
-    if (query.yearMonth) {
-      const [y, m] = query.yearMonth.split('-').map(Number);
-      filter.inboundDate = { $gte: new Date(y, m - 1, 1), $lt: new Date(y, m, 1) };
-    }
-
-    // 相册按时间从早到晚排（跟对着单据从月初核对到月底的顺序一致）
-    const records = await this.inboundModel.find(filter).sort({ inboundDate: 1, createdAt: 1 }).lean();
     const factories = await this.factoryService.findAll();
     const factoryNameMap = new Map(factories.map((f) => [f.id, f.name]));
+    let range: { $gte: Date; $lt: Date } | null = null;
+    if (query.yearMonth) {
+      const [y, m] = query.yearMonth.split('-').map(Number);
+      range = { $gte: new Date(y, m - 1, 1), $lt: new Date(y, m, 1) };
+    }
 
-    return records.map((r) => ({
-      recordId: String(r._id),
-      code: r.code,
-      factoryId: r.factoryId ? String(r.factoryId) : null,
-      factoryName: r.factoryId ? (factoryNameMap.get(String(r.factoryId)) ?? '未知玩具厂') : '未知玩具厂',
-      inboundDate: r.inboundDate.toISOString(),
-      imageUrl: r.imageUrl,
-      rotation: r.rotation,
-      status: r.status,
-    }));
+    const items: InboundGalleryItem[] = [];
+
+    if (query.kind !== 'outbound') {
+      const filter: FilterQuery<InboundRecord> = { imageUrl: { $ne: '' } };
+      if (query.factoryId) filter.factoryId = new Types.ObjectId(query.factoryId);
+      if (range) filter.inboundDate = range;
+      const records = await this.inboundModel.find(filter).sort({ inboundDate: 1, createdAt: 1 }).lean();
+      for (const r of records) {
+        items.push({
+          kind: 'inbound',
+          recordId: String(r._id),
+          code: r.code,
+          factoryId: r.factoryId ? String(r.factoryId) : null,
+          factoryName: r.factoryId ? (factoryNameMap.get(String(r.factoryId)) ?? '未知玩具厂') : '未知玩具厂',
+          inboundDate: r.inboundDate.toISOString(),
+          imageUrl: r.imageUrl,
+          rotation: r.rotation,
+          status: r.status,
+        });
+      }
+    }
+
+    if (query.kind !== 'inbound') {
+      // 出库单的 factoryId 存的是字符串（历史原因，入库单那边是 ObjectId），两种都匹配
+      const filter: Record<string, unknown> = { 'images.0': { $exists: true } };
+      if (query.factoryId) filter.factoryId = { $in: [query.factoryId, new Types.ObjectId(query.factoryId)] };
+      if (range) filter.returnDate = range;
+      const records = await this.outboundModel
+        .find(filter as never)
+        .sort({ returnDate: 1, createdAt: 1 })
+        .lean();
+      const seen = new Set<string>();
+      for (const r of records) {
+        for (const url of r.images ?? []) {
+          if (!url || seen.has(url)) continue;
+          seen.add(url);
+          items.push({
+            kind: 'outbound',
+            recordId: String(r._id),
+            code: '',
+            factoryId: String(r.factoryId),
+            factoryName: factoryNameMap.get(String(r.factoryId)) ?? '未知玩具厂',
+            inboundDate: r.returnDate.toISOString(),
+            imageUrl: url,
+            rotation: r.rotation ?? 0,
+          });
+        }
+      }
+    }
+
+    // 两种单据合在一起按日期从早到晚排；同一天的保持原来的先后（入库单在前、出库单在后）
+    return items.sort((a, b) => a.inboundDate.localeCompare(b.inboundDate));
   }
 
   /**

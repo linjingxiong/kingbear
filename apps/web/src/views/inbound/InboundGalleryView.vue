@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import dayjs from "dayjs";
-import type { FactoryListItem, InboundGalleryItem } from "@kingbear/shared";
+import type { FactoryListItem, GalleryKind, InboundGalleryItem } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { getInboundGallery } from "../../api/inbound";
 
@@ -10,6 +10,8 @@ const factoryId = ref<string>("");
 // 账期下拉：最近12个月 + "全部"，"全部"就是空字符串不传 yearMonth，跟应收账单那个选择器同一个思路
 const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
 const yearMonth = ref<string>("");
+// 单据种类：空字符串 = 入库单、出库单都看
+const kind = ref<"" | GalleryKind>("");
 
 const list = ref<InboundGalleryItem[]>([]);
 const loading = ref(false);
@@ -24,6 +26,7 @@ async function load() {
     list.value = await getInboundGallery({
       factoryId: factoryId.value || undefined,
       yearMonth: yearMonth.value || undefined,
+      kind: kind.value || undefined,
     });
   } finally {
     loading.value = false;
@@ -49,11 +52,16 @@ onMounted(async () => {
       <el-select v-model="yearMonth" placeholder="全部时间" clearable style="width: 160px" @change="load">
         <el-option v-for="m in monthOptions" :key="m" :label="m" :value="m" />
       </el-select>
+      <el-radio-group v-model="kind" @change="load">
+        <el-radio-button value="">全部单据</el-radio-button>
+        <el-radio-button value="inbound">入库单</el-radio-button>
+        <el-radio-button value="outbound">出库单</el-radio-button>
+      </el-radio-group>
       <span class="filter-count" v-if="!loading">共 {{ list.length }} 张</span>
     </div>
 
     <div v-loading="loading" class="gallery-grid">
-      <div v-for="(item, idx) in list" :key="item.recordId" class="gallery-card">
+      <div v-for="(item, idx) in list" :key="`${item.kind}:${item.recordId}`" class="gallery-card">
         <el-image
           :src="item.imageUrl"
           :preview-src-list="previewList" hide-on-click-modal
@@ -65,12 +73,17 @@ onMounted(async () => {
           lazy
         />
         <div class="gallery-caption">
-          <div class="gallery-caption-main">{{ item.factoryName }}</div>
+          <div class="gallery-caption-main">
+            {{ item.factoryName }}
+            <el-tag :type="item.kind === 'inbound' ? 'success' : 'primary'" size="small" effect="plain" class="gallery-kind-tag">
+              {{ item.kind === "inbound" ? "入库" : "出库" }}
+            </el-tag>
+          </div>
           <div class="gallery-caption-sub">{{ dateLabel(item.inboundDate) }}</div>
         </div>
       </div>
     </div>
-    <el-empty v-if="!loading && !list.length" description="没有符合条件的入库单照片" />
+    <el-empty v-if="!loading && !list.length" description="没有符合条件的单据照片" />
   </div>
 </template>
 
@@ -123,6 +136,11 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.gallery-kind-tag {
+  margin-left: 4px;
+  vertical-align: 1px;
 }
 
 .gallery-caption-sub {
