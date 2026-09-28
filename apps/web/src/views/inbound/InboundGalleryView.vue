@@ -56,7 +56,7 @@ onMounted(async () => {
       <div v-for="(item, idx) in list" :key="item.recordId" class="gallery-card">
         <el-image
           :src="item.imageUrl"
-          :preview-src-list="previewList"
+          :preview-src-list="previewList" hide-on-click-modal
           :initial-index="idx"
           preview-teleported
           fit="cover"

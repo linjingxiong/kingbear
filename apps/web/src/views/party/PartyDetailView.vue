@@ -209,7 +209,7 @@ onMounted(load);
                 <el-image
                   v-if="row.images.length"
                   :src="row.images[0]"
-                  :preview-src-list="row.images"
+                  :preview-src-list="row.images" hide-on-click-modal
                   preview-teleported
                   fit="cover"
                   class="thumb"
@@ -249,7 +249,7 @@ onMounted(load);
             <div v-for="(g, idx) in gallery" :key="g.url" class="gallery-card">
               <el-image
                 :src="g.url"
-                :preview-src-list="previewList"
+                :preview-src-list="previewList" hide-on-click-modal
                 :initial-index="idx"
                 preview-teleported
                 fit="cover"

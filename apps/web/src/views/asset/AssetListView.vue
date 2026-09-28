@@ -156,7 +156,7 @@ onMounted(() => {
               v-for="url in row.images"
               :key="url"
               :src="url"
-              :preview-src-list="row.images"
+              :preview-src-list="row.images" hide-on-click-modal
               preview-teleported
               fit="cover"
               class="thumb"
@@ -229,7 +229,7 @@ onMounted(() => {
             </el-upload>
             <div v-if="form.images?.length" class="image-list">
               <div v-for="(url, idx) in form.images" :key="url" class="image-item">
-                <el-image :src="url" :preview-src-list="form.images" preview-teleported fit="cover" class="thumb" />
+                <el-image :src="url" :preview-src-list="form.images" hide-on-click-modal preview-teleported fit="cover" class="thumb" />
                 <el-icon class="remove-icon" @click="removeImage(idx)"><CircleClose /></el-icon>
               </div>
             </div>

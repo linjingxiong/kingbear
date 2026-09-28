@@ -472,7 +472,7 @@ onMounted(async () => {
                       <el-image
                         v-if="row.imageUrl"
                         :src="row.imageUrl"
-                        :preview-src-list="[row.imageUrl]"
+                        :preview-src-list="[row.imageUrl]" hide-on-click-modal
                         preview-teleported
                         fit="cover"
                         class="detail-thumb"
@@ -519,7 +519,7 @@ onMounted(async () => {
                   <el-image
                     v-if="row.imageUrl"
                     :src="row.imageUrl"
-                    :preview-src-list="[row.imageUrl]"
+                    :preview-src-list="[row.imageUrl]" hide-on-click-modal
                     preview-teleported
                     fit="cover"
                     class="detail-thumb"
