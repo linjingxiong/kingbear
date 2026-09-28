@@ -275,7 +275,8 @@ export class InboundService {
       filter.inboundDate = { $gte: new Date(y, m - 1, 1), $lt: new Date(y, m, 1) };
     }
 
-    const records = await this.inboundModel.find(filter).sort({ inboundDate: -1, createdAt: -1 }).lean();
+    // 相册按时间从早到晚排（跟对着单据从月初核对到月底的顺序一致）
+    const records = await this.inboundModel.find(filter).sort({ inboundDate: 1, createdAt: 1 }).lean();
     const factories = await this.factoryService.findAll();
     const factoryNameMap = new Map(factories.map((f) => [f.id, f.name]));
 

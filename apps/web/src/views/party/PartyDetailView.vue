@@ -88,7 +88,10 @@ const gallery = computed(() => {
   for (const r of filteredRows.value) {
     for (const url of r.images) if (!seen.has(url)) seen.set(url, r);
   }
-  return [...seen.entries()].map(([url, r]) => ({ url, date: r.date, typeLabel: r.typeLabel, code: r.code }));
+  // 相册按时间从早到晚排（流水本身是倒序的，这里翻过来）
+  return [...seen.entries()]
+    .map(([url, r]) => ({ url, date: r.date, typeLabel: r.typeLabel }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 });
 const previewList = computed(() => gallery.value.map((g) => g.url));
 
@@ -254,7 +257,7 @@ onMounted(load);
                 lazy
               />
               <div class="gallery-caption">{{ g.typeLabel }}</div>
-              <div class="gallery-caption muted">{{ fmtDate(g.date) }}{{ g.code ? ` · ${g.code}` : "" }}</div>
+              <div class="gallery-caption muted">{{ fmtDate(g.date) }}</div>
             </div>
           </div>
           <el-empty v-if="!loading && !gallery.length" description="没有单据照片" />

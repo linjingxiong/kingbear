@@ -66,7 +66,7 @@ onMounted(async () => {
         />
         <div class="gallery-caption">
           <div class="gallery-caption-main">{{ item.factoryName }}</div>
-          <div class="gallery-caption-sub">{{ dateLabel(item.inboundDate) }} · {{ item.code }}</div>
+          <div class="gallery-caption-sub">{{ dateLabel(item.inboundDate) }}</div>
         </div>
       </div>
     </div>
