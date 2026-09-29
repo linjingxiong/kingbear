@@ -71,12 +71,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "物料台账" },
       },
       {
-        path: "material-ledger/:factoryId",
-        name: "material-ledger-detail",
-        component: () => import("../views/material-ledger/MaterialLedgerDetailView.vue"),
-        meta: { title: "物料台账详情" },
-      },
-      {
         path: "party",
         name: "party",
         component: () => import("../views/party/PartyListView.vue"),
