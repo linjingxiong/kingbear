@@ -95,19 +95,41 @@ const productPivots = computed<ProductPivot[]>(() => {
 
 const grandTotal = computed(() => productPivots.value.reduce((sum, g) => sum + g.grandTotal, 0));
 
-// 产品用 tab 横向切换，不用一个个往下展开；默认停在收得最多的那个产品
-// （productPivots 本来就是按合计从大到小排的），换厂/换月之后原来选的产品可能已经不在了，
-// 自动跳回收得最多的那个，不会停在一个空 tab 上
-const activeProduct = ref("");
-watch(
-  productPivots,
-  (groups) => {
-    if (!groups.some((g) => g.productGroupName === activeProduct.value)) {
-      activeProduct.value = groups[0]?.productGroupName ?? "";
-    }
-  },
-  { immediate: true },
+// 汇总：每个产品一行，一眼看出各产品收了多少、占比多少，不用把每个产品的 tab 都点一遍再心算加起来
+interface ProductSummaryRow {
+  productGroupName: string;
+  materialCount: number;
+  dayCount: number;
+  totalWeightJin: number;
+}
+const productSummaryRows = computed<ProductSummaryRow[]>(() =>
+  productPivots.value.map((g) => ({
+    productGroupName: g.productGroupName,
+    materialCount: g.materials.length,
+    dayCount: g.rows.length,
+    totalWeightJin: g.grandTotal,
+  })),
 );
+
+const SUMMARY_TAB = "__summary__";
+// 默认停在"汇总"这个 tab，先看总览，想看哪个产品的明细再点过去；换厂/换月之后原来选的
+// 产品可能已经不在了，跳回汇总，不会停在一个空 tab 上
+const activeProduct = ref(SUMMARY_TAB);
+watch(productPivots, (groups) => {
+  if (activeProduct.value !== SUMMARY_TAB && !groups.some((g) => g.productGroupName === activeProduct.value)) {
+    activeProduct.value = SUMMARY_TAB;
+  }
+});
+
+// 汇总 tab 的合计行：种类/天数不加总（加起来没意义，产品之间物料/日期会重叠），
+// 只把"合计重量"这一列加总
+function summaryOverviewMethod({ columns }: { columns: { label: string }[] }): string[] {
+  return columns.map((col, idx) => {
+    if (idx === 0) return "合计";
+    if (col.label === "合计重量(斤)") return grandTotal.value.toLocaleString();
+    return "";
+  });
+}
 
 // el-table 的合计行：第一列写"合计"，物料列按 totals 里对应的数取，小计/凭证列不用数字
 function pivotSummary(g: ProductPivot, { columns }: { columns: { label: string }[] }): string[] {
@@ -152,8 +174,23 @@ onMounted(async () => {
       <span class="filter-summary">累计收到 {{ grandTotal.toLocaleString() }} 斤</span>
     </div>
 
-    <!-- 产品用 tab 横向切换，不用像折叠面板那样一个个往下展开——点哪个产品就看哪个产品的表 -->
+    <!-- 产品用 tab 横向切换，不用像折叠面板那样一个个往下展开——点哪个产品就看哪个产品的表；
+         "汇总"排第一个、默认停在这里，先看总览 -->
     <el-tabs v-model="activeProduct">
+      <el-tab-pane :name="SUMMARY_TAB" label="汇总">
+        <el-table :data="productSummaryRows" size="small" border show-summary :summary-method="summaryOverviewMethod">
+          <el-table-column prop="productGroupName" label="产品" min-width="160" />
+          <el-table-column label="物料种类" width="110" align="right">
+            <template #default="{ row }">{{ row.materialCount }} 种</template>
+          </el-table-column>
+          <el-table-column label="收料天数" width="110" align="right">
+            <template #default="{ row }">{{ row.dayCount }} 天</template>
+          </el-table-column>
+          <el-table-column label="合计重量(斤)" width="140" align="right">
+            <template #default="{ row }">{{ row.totalWeightJin.toLocaleString() }}</template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
       <el-tab-pane v-for="g in productPivots" :key="g.productGroupName" :name="g.productGroupName" lazy>
         <template #label>
           <span>{{ g.productGroupName }}</span>
