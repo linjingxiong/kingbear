@@ -11,6 +11,7 @@ import { listInboundReturns } from "../../api/inbound-return";
 // 数据直接复用出库单列表接口，前端自己按玩具厂汇总，没有新接口。
 const router = useRouter();
 const factories = ref<FactoryListItem[]>([]);
+const factoryId = ref("");
 const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
 const yearMonth = ref("");
 
@@ -27,7 +28,12 @@ async function load() {
 }
 
 const issueRows = computed(() =>
-  list.value.filter((r) => r.kind === "issue" && (!yearMonth.value || (r.returnDate ?? "").startsWith(yearMonth.value))),
+  list.value.filter(
+    (r) =>
+      r.kind === "issue" &&
+      (!factoryId.value || r.factoryId === factoryId.value) &&
+      (!yearMonth.value || (r.returnDate ?? "").startsWith(yearMonth.value)),
+  ),
 );
 
 interface FactorySummary {
@@ -92,6 +98,9 @@ onMounted(async () => {
     </el-alert>
 
     <div class="filter-bar">
+      <el-select v-model="factoryId" placeholder="全部玩具厂" clearable filterable style="width: 200px">
+        <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
+      </el-select>
       <el-select v-model="yearMonth" placeholder="全部时间" clearable style="width: 160px">
         <el-option v-for="m in monthOptions" :key="m" :label="m" :value="m" />
       </el-select>
