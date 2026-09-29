@@ -224,7 +224,7 @@ onMounted(async () => {
     <div v-if="productSummaryRows.length" class="summary-section">
       <h3 class="summary-title">汇总</h3>
       <el-table :data="productSummaryRows" size="small" border show-summary :summary-method="summaryOverviewMethod">
-        <el-table-column prop="productGroupName" label="产品" min-width="160" />
+        <el-table-column prop="productGroupName" label="产品" width="180" />
         <el-table-column label="物料种类" width="110" align="right">
           <template #default="{ row }">{{ row.materialCount }} 种</template>
         </el-table-column>
@@ -264,11 +264,16 @@ onMounted(async () => {
 
 .summary-section {
   margin-top: 24px;
+  /* 只有产品/物料种类/天数/合计重量四列，不用跟上面的明细表一样撑满整个页面宽度，
+     数字紧挨着标签看着才紧凑，不然列与列之间空得很松散 */
+  max-width: 640px;
 }
 
 .summary-title {
-  margin: 0 0 10px;
-  font-size: 15px;
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #606266;
 }
 
 .pivot-wrap {
