@@ -13,7 +13,8 @@ const router = useRouter();
 const factories = ref<FactoryListItem[]>([]);
 const factoryId = ref("");
 const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
-const yearMonth = ref("");
+// 默认当月，不用每次自己选——大部分时候就是想看"这个月收了多少"
+const yearMonth = ref(dayjs().format("YYYY-MM"));
 
 const list = ref<InboundReturnListItem[]>([]);
 const loading = ref(false);
@@ -84,6 +85,9 @@ function openDetail(row: FactorySummary) {
 
 onMounted(async () => {
   factories.value = await listFactories();
+  // 默认优先选"美奇"，列表里没有的话（比如换了环境）就不选，不会白屏选不出来
+  const preferred = factories.value.find((f) => f.name === "美奇");
+  if (preferred) factoryId.value = preferred.id;
   load();
 });
 </script>

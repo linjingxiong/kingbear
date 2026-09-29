@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import dayjs from "dayjs";
 import type { FactoryListItem, InboundReturnListItem } from "@kingbear/shared";
@@ -17,7 +17,8 @@ const factories = ref<FactoryListItem[]>([]);
 const list = ref<InboundReturnListItem[]>([]);
 const loading = ref(false);
 const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
-const yearMonth = ref("");
+// 默认当月，不用每次自己选
+const yearMonth = ref(dayjs().format("YYYY-MM"));
 
 // 换玩具厂不用退回列表页重新点——直接在这个下拉里切，路由跟着换（链接照样能收藏/分享）
 function onFactoryChange(id: string) {
@@ -102,8 +103,18 @@ const productPivots = computed<ProductPivot[]>(() => {
 
 const grandTotal = computed(() => productPivots.value.reduce((sum, g) => sum + g.grandTotal, 0));
 
-// 折叠面板默认全收起——数据一多，一进来就展开等于又变回平铺
-const activeProducts = ref<string[]>([]);
+// 产品用 tab 切换，横着点来点去，不用像折叠面板那样一个个往下展开、越展开越长；
+// 默认停在收得最多的那个产品（productPivots 本来就是按合计从大到小排的）
+const activeProduct = ref("");
+watch(
+  productPivots,
+  (groups) => {
+    if (!groups.some((g) => g.productGroupName === activeProduct.value)) {
+      activeProduct.value = groups[0]?.productGroupName ?? "";
+    }
+  },
+  { immediate: true },
+);
 
 // el-table 的合计行：第一列写"合计"，物料列按 totals 里对应的数取，小计/凭证列不用数字
 function pivotSummary(g: ProductPivot, { columns }: { columns: { label: string }[] }): string[] {
@@ -140,11 +151,17 @@ onMounted(async () => {
       <span class="filter-summary">累计收到 {{ grandTotal.toLocaleString() }} 斤</span>
     </div>
 
-    <el-collapse v-model="activeProducts">
-      <el-collapse-item v-for="g in productPivots" :key="g.productGroupName" :name="g.productGroupName">
-        <template #title>
-          <span class="product-title">{{ g.productGroupName }}</span>
-          <span class="product-sub">合计 {{ g.grandTotal.toLocaleString() }} 斤 · {{ g.rows.length }} 天</span>
+    <!-- 产品用 tab 横向切换，不用像折叠面板那样一个个往下展开——点哪个产品就看哪个产品的表 -->
+    <el-tabs v-model="activeProduct">
+      <el-tab-pane
+        v-for="g in productPivots"
+        :key="g.productGroupName"
+        :name="g.productGroupName"
+        lazy
+      >
+        <template #label>
+          <span>{{ g.productGroupName }}</span>
+          <span class="product-sub">（{{ g.grandTotal.toLocaleString() }} 斤）</span>
         </template>
 
         <!-- 物料对账单：表头是这个产品各个物料的名字，一行一天，最下面一行是每个物料的合计。
@@ -176,8 +193,8 @@ onMounted(async () => {
             </el-table-column>
           </el-table>
         </div>
-      </el-collapse-item>
-    </el-collapse>
+      </el-tab-pane>
+    </el-tabs>
     <el-empty v-if="!loading && !productPivots.length" description="没有符合条件的发料记录" />
   </div>
 </template>
@@ -198,11 +215,6 @@ onMounted(async () => {
 .filter-summary {
   color: #909399;
   font-size: 13px;
-}
-
-.product-title {
-  font-weight: 600;
-  margin-right: 12px;
 }
 
 .product-sub {
