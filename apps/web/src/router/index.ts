@@ -65,6 +65,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "物料流转" },
       },
       {
+        path: "material-ledger",
+        name: "material-ledger",
+        component: () => import("../views/material-ledger/MaterialLedgerView.vue"),
+        meta: { title: "物料台账" },
+      },
+      {
         path: "party",
         name: "party",
         component: () => import("../views/party/PartyListView.vue"),

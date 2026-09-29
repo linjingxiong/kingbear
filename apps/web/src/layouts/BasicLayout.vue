@@ -40,6 +40,8 @@ const menuItems: (MenuLeaf | MenuGroup)[] = [
       // 物料发放/成品回收/通用物料回收/物料对账，都是围绕"代工厂物料收发"这一件事，
       // 合并成一个页面用 tab 切换（见 MaterialFlowHubView）
       { path: "/material-flow", title: "物料流转", icon: "Promotion" },
+      // 物料台账：玩具厂发料给我，收了多少物料——先单独一个面板，以后把发给代工厂那段接进来算结余
+      { path: "/material-ledger", title: "物料台账", icon: "Files" },
       { path: "/asset", title: "资产盘点", icon: "Suitcase" },
     ],
   },
