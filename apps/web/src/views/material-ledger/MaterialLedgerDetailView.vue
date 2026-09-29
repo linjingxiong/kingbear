@@ -6,9 +6,9 @@ import type { FactoryListItem, InboundReturnListItem } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { listInboundReturns } from "../../api/inbound-return";
 
-// 这个玩具厂具体收了哪些物料：按"产品"折叠分组，默认都收着，点开哪个产品才看得到它下面
-// 的物料，物料这一行再点开才看到每一笔的日期/重量/备注/凭证——三层逐级展开，不会一进来
-// 就是一整屏平铺的明细表
+// 物料对账单：按产品分组（折叠，默认收起），每个产品一张表——表头是这个产品用到的各个物料
+// 名称，一行是一天，格子里是那天收了多少斤，最后一行"合计"把每个物料的总数加出来。
+// 跟纸质出库单本来的样子是一回事（一天一行、好几个物料摊开写），只是换成电子表格好核对。
 const route = useRoute();
 const router = useRouter();
 const factoryId = computed(() => route.params.factoryId as string);
@@ -42,59 +42,79 @@ const factoryRows = computed(() =>
   ),
 );
 
-interface MaterialRow {
-  key: string;
-  materialName: string;
-  totalWeightJin: number;
-  recordCount: number;
-  firstDate: string;
-  lastDate: string;
-  records: InboundReturnListItem[];
+interface PivotRow {
+  date: string;
+  /** 物料名称 → 那天收的重量(斤) */
+  values: Record<string, number>;
+  rowTotal: number;
+  /** 那天这一批单据的凭证图（同一次提交的几行物料共用同一张图） */
+  images: string[];
 }
-interface ProductGroupRow {
+interface ProductPivot {
   productGroupName: string;
-  totalWeightJin: number;
-  recordCount: number;
-  materials: MaterialRow[];
+  /** 这个产品出现过的物料，按名字排，就是表格的列 */
+  materials: string[];
+  rows: PivotRow[];
+  /** 每个物料的合计（对应"合计"那一行） */
+  totals: Record<string, number>;
+  grandTotal: number;
 }
 
-// 先按产品分组，产品里面再按物料名称分组——两层折叠，跟树目录一个意思
-const productGroups = computed<ProductGroupRow[]>(() => {
-  const groups = new Map<string, Map<string, MaterialRow>>();
+// 先按产品分组；组内再按日期把当天所有物料摊平成一行（表头=物料名，行=日期），
+// 同一天同一个物料出现好几条的话（比如手滑分两次录），重量加在一起
+const productPivots = computed<ProductPivot[]>(() => {
+  const byProduct = new Map<string, InboundReturnListItem[]>();
   for (const r of factoryRows.value) {
-    const productGroupName = r.productGroupName || "未指定产品";
-    const materialName = (r.materialName || r.name || "未知物料").trim();
-    const date = (r.returnDate ?? "").slice(0, 10);
-    if (!groups.has(productGroupName)) groups.set(productGroupName, new Map());
-    const materials = groups.get(productGroupName)!;
-    let m = materials.get(materialName);
-    if (!m) {
-      m = { key: `${productGroupName}|${materialName}`, materialName, totalWeightJin: 0, recordCount: 0, firstDate: date, lastDate: date, records: [] };
-      materials.set(materialName, m);
-    }
-    m.totalWeightJin += r.weightJin;
-    m.recordCount += 1;
-    if (date && date < m.firstDate) m.firstDate = date;
-    if (date && date > m.lastDate) m.lastDate = date;
-    m.records.push(r);
+    const key = r.productGroupName || "未指定产品";
+    if (!byProduct.has(key)) byProduct.set(key, []);
+    byProduct.get(key)!.push(r);
   }
-  return [...groups.entries()]
-    .map(([productGroupName, materials]) => {
-      const materialList = [...materials.values()].sort((a, b) => a.materialName.localeCompare(b.materialName));
-      return {
-        productGroupName,
-        totalWeightJin: materialList.reduce((sum, m) => sum + m.totalWeightJin, 0),
-        recordCount: materialList.reduce((sum, m) => sum + m.recordCount, 0),
-        materials: materialList,
-      };
-    })
-    .sort((a, b) => b.totalWeightJin - a.totalWeightJin);
+
+  const pivots: ProductPivot[] = [];
+  for (const [productGroupName, records] of byProduct) {
+    const materialsSet = new Set<string>();
+    const byDate = new Map<string, { values: Record<string, number>; images: Set<string> }>();
+    for (const r of records) {
+      const materialName = (r.materialName || r.name || "未知物料").trim();
+      materialsSet.add(materialName);
+      const date = (r.returnDate ?? "").slice(0, 10);
+      if (!byDate.has(date)) byDate.set(date, { values: {}, images: new Set() });
+      const d = byDate.get(date)!;
+      d.values[materialName] = (d.values[materialName] ?? 0) + r.weightJin;
+      for (const url of r.images ?? []) d.images.add(url);
+    }
+    const materials = [...materialsSet].sort((a, b) => a.localeCompare(b));
+    const rows: PivotRow[] = [...byDate.entries()]
+      .map(([date, d]) => ({
+        date,
+        values: d.values,
+        rowTotal: Object.values(d.values).reduce((sum, v) => sum + v, 0),
+        images: [...d.images],
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const totals: Record<string, number> = {};
+    for (const m of materials) totals[m] = rows.reduce((sum, r) => sum + (r.values[m] ?? 0), 0);
+    const grandTotal = rows.reduce((sum, r) => sum + r.rowTotal, 0);
+    pivots.push({ productGroupName, materials, rows, totals, grandTotal });
+  }
+  return pivots.sort((a, b) => b.grandTotal - a.grandTotal);
 });
 
-const grandTotal = computed(() => productGroups.value.reduce((sum, g) => sum + g.totalWeightJin, 0));
+const grandTotal = computed(() => productPivots.value.reduce((sum, g) => sum + g.grandTotal, 0));
 
 // 折叠面板默认全收起——数据一多，一进来就展开等于又变回平铺
 const activeProducts = ref<string[]>([]);
+
+// el-table 的合计行：第一列写"合计"，物料列按 totals 里对应的数取，小计/凭证列不用数字
+function pivotSummary(g: ProductPivot, { columns }: { columns: { label: string }[] }): string[] {
+  return columns.map((col, idx) => {
+    if (idx === 0) return "合计";
+    if (col.label === "小计") return g.grandTotal.toLocaleString();
+    if (col.label === "凭证") return "";
+    const total = g.totals[col.label];
+    return total ? total.toLocaleString() : "-";
+  });
+}
 
 function fmtDate(iso: string) {
   return iso ? dayjs(iso).format("YYYY-MM-DD") : "-";
@@ -121,54 +141,44 @@ onMounted(async () => {
     </div>
 
     <el-collapse v-model="activeProducts">
-      <el-collapse-item v-for="g in productGroups" :key="g.productGroupName" :name="g.productGroupName">
+      <el-collapse-item v-for="g in productPivots" :key="g.productGroupName" :name="g.productGroupName">
         <template #title>
           <span class="product-title">{{ g.productGroupName }}</span>
-          <span class="product-sub">小计 {{ g.totalWeightJin.toLocaleString() }} 斤 · {{ g.recordCount }} 笔</span>
+          <span class="product-sub">合计 {{ g.grandTotal.toLocaleString() }} 斤 · {{ g.rows.length }} 天</span>
         </template>
 
-        <el-table :data="g.materials" size="small" row-key="key">
-          <el-table-column type="expand">
-            <template #default="{ row }">
-              <el-table :data="row.records" size="small" class="detail-table">
-                <el-table-column label="日期" width="110">
-                  <template #default="{ row: d }">{{ fmtDate(d.returnDate) }}</template>
-                </el-table-column>
-                <el-table-column label="重量(斤)" width="100" align="right">
-                  <template #default="{ row: d }">{{ d.weightJin }}</template>
-                </el-table-column>
-                <el-table-column prop="remark" label="备注" show-overflow-tooltip />
-                <el-table-column label="凭证" width="70" align="center">
-                  <template #default="{ row: d }">
-                    <el-image
-                      v-if="d.images.length"
-                      :src="d.images[0]"
-                      :preview-src-list="d.images"
-                      hide-on-click-modal
-                      preview-teleported
-                      fit="cover"
-                      class="thumb"
-                    />
-                    <span v-else class="muted">-</span>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </template>
-          </el-table-column>
-          <el-table-column prop="materialName" label="物料名称" min-width="160" show-overflow-tooltip />
-          <el-table-column label="收到重量(斤)" width="130" align="right">
-            <template #default="{ row }">{{ row.totalWeightJin.toLocaleString() }}</template>
-          </el-table-column>
-          <el-table-column label="笔数" width="80" align="right">
-            <template #default="{ row }">{{ row.recordCount }}</template>
-          </el-table-column>
-          <el-table-column label="最早 · 最近" width="200">
-            <template #default="{ row }">{{ fmtDate(row.firstDate) }} · {{ fmtDate(row.lastDate) }}</template>
-          </el-table-column>
-        </el-table>
+        <!-- 物料对账单：表头是这个产品各个物料的名字，一行一天，最下面一行是每个物料的合计。
+             列一多横向就滚动（日期固定在左、小计/凭证固定在右，中间的物料列滚） -->
+        <div class="pivot-wrap">
+          <el-table :data="g.rows" size="small" border show-summary :summary-method="(p) => pivotSummary(g, p)">
+            <el-table-column label="日期" width="110" fixed="left">
+              <template #default="{ row }">{{ fmtDate(row.date) }}</template>
+            </el-table-column>
+            <el-table-column v-for="m in g.materials" :key="m" :label="m" min-width="90" align="right">
+              <template #default="{ row }">{{ row.values[m] ? row.values[m].toLocaleString() : "-" }}</template>
+            </el-table-column>
+            <el-table-column label="小计" width="100" align="right" fixed="right">
+              <template #default="{ row }">{{ row.rowTotal.toLocaleString() }}</template>
+            </el-table-column>
+            <el-table-column label="凭证" width="70" align="center" fixed="right">
+              <template #default="{ row }">
+                <el-image
+                  v-if="row.images.length"
+                  :src="row.images[0]"
+                  :preview-src-list="row.images"
+                  hide-on-click-modal
+                  preview-teleported
+                  fit="cover"
+                  class="thumb"
+                />
+                <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </el-collapse-item>
     </el-collapse>
-    <el-empty v-if="!loading && !productGroups.length" description="没有符合条件的发料记录" />
+    <el-empty v-if="!loading && !productPivots.length" description="没有符合条件的发料记录" />
   </div>
 </template>
 
@@ -179,11 +189,6 @@ onMounted(async () => {
   gap: 16px;
   margin-bottom: 16px;
   flex-wrap: wrap;
-}
-
-.head-title {
-  margin: 0;
-  font-size: 18px;
 }
 
 .head-filter {
@@ -205,9 +210,8 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.detail-table {
-  margin: 4px 24px;
-  width: calc(100% - 48px);
+.pivot-wrap {
+  overflow-x: auto;
 }
 
 .thumb {
