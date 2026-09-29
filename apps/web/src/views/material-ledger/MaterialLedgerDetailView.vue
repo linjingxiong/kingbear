@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import dayjs from "dayjs";
-import type { InboundReturnListItem } from "@kingbear/shared";
+import type { FactoryListItem, InboundReturnListItem } from "@kingbear/shared";
+import { listFactories } from "../../api/factory";
 import { listInboundReturns } from "../../api/inbound-return";
 
 // 这个玩具厂具体收了哪些物料：按"产品"折叠分组，默认都收着，点开哪个产品才看得到它下面
@@ -12,10 +13,16 @@ const route = useRoute();
 const router = useRouter();
 const factoryId = computed(() => route.params.factoryId as string);
 
+const factories = ref<FactoryListItem[]>([]);
 const list = ref<InboundReturnListItem[]>([]);
 const loading = ref(false);
 const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
 const yearMonth = ref("");
+
+// 换玩具厂不用退回列表页重新点——直接在这个下拉里切，路由跟着换（链接照样能收藏/分享）
+function onFactoryChange(id: string) {
+  router.replace(`/material-ledger/${id}`);
+}
 
 async function load() {
   loading.value = true;
@@ -34,8 +41,6 @@ const factoryRows = computed(() =>
       (!yearMonth.value || (r.returnDate ?? "").startsWith(yearMonth.value)),
   ),
 );
-
-const factoryName = computed(() => factoryRows.value[0]?.factoryName ?? "");
 
 interface MaterialRow {
   key: string;
@@ -95,14 +100,20 @@ function fmtDate(iso: string) {
   return iso ? dayjs(iso).format("YYYY-MM-DD") : "-";
 }
 
-onMounted(load);
+onMounted(async () => {
+  factories.value = await listFactories();
+  load();
+});
 </script>
 
 <template>
   <div v-loading="loading">
     <div class="head-row">
       <el-button link type="primary" @click="router.push('/material-ledger')">← 返回物料台账</el-button>
-      <h2 class="head-title">{{ factoryName || "玩具厂" }}</h2>
+      <!-- 换玩具厂直接在这个下拉里切，不用退回列表页重新点一遍 -->
+      <el-select :model-value="factoryId" filterable style="width: 180px" @change="onFactoryChange">
+        <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
+      </el-select>
       <el-select v-model="yearMonth" placeholder="全部时间" clearable style="width: 160px" class="head-filter">
         <el-option v-for="m in monthOptions" :key="m" :label="m" :value="m" />
       </el-select>
