@@ -111,17 +111,21 @@ const productSummaryRows = computed<ProductSummaryRow[]>(() =>
   })),
 );
 
-const SUMMARY_TAB = "__summary__";
-// 默认停在"汇总"这个 tab，先看总览，想看哪个产品的明细再点过去；换厂/换月之后原来选的
-// 产品可能已经不在了，跳回汇总，不会停在一个空 tab 上
-const activeProduct = ref(SUMMARY_TAB);
-watch(productPivots, (groups) => {
-  if (activeProduct.value !== SUMMARY_TAB && !groups.some((g) => g.productGroupName === activeProduct.value)) {
-    activeProduct.value = SUMMARY_TAB;
-  }
-});
+// 产品用 tab 横向切换，不用一个个往下展开；默认停在收得最多的那个产品
+// （productPivots 本来就是按合计从大到小排的），换厂/换月之后原来选的产品可能已经不在了，
+// 自动跳回收得最多的那个，不会停在一个空 tab 上
+const activeProduct = ref("");
+watch(
+  productPivots,
+  (groups) => {
+    if (!groups.some((g) => g.productGroupName === activeProduct.value)) {
+      activeProduct.value = groups[0]?.productGroupName ?? "";
+    }
+  },
+  { immediate: true },
+);
 
-// 汇总 tab 的合计行：种类/天数不加总（加起来没意义，产品之间物料/日期会重叠），
+// 汇总表的合计行：种类/天数不加总（加起来没意义，产品之间物料/日期会重叠），
 // 只把"合计重量"这一列加总
 function summaryOverviewMethod({ columns }: { columns: { label: string }[] }): string[] {
   return columns.map((col, idx) => {
@@ -174,23 +178,8 @@ onMounted(async () => {
       <span class="filter-summary">累计收到 {{ grandTotal.toLocaleString() }} 斤</span>
     </div>
 
-    <!-- 产品用 tab 横向切换，不用像折叠面板那样一个个往下展开——点哪个产品就看哪个产品的表；
-         "汇总"排第一个、默认停在这里，先看总览 -->
+    <!-- 产品用 tab 横向切换，不用像折叠面板那样一个个往下展开——点哪个产品就看哪个产品的表 -->
     <el-tabs v-model="activeProduct">
-      <el-tab-pane :name="SUMMARY_TAB" label="汇总">
-        <el-table :data="productSummaryRows" size="small" border show-summary :summary-method="summaryOverviewMethod">
-          <el-table-column prop="productGroupName" label="产品" min-width="160" />
-          <el-table-column label="物料种类" width="110" align="right">
-            <template #default="{ row }">{{ row.materialCount }} 种</template>
-          </el-table-column>
-          <el-table-column label="收料天数" width="110" align="right">
-            <template #default="{ row }">{{ row.dayCount }} 天</template>
-          </el-table-column>
-          <el-table-column label="合计重量(斤)" width="140" align="right">
-            <template #default="{ row }">{{ row.totalWeightJin.toLocaleString() }}</template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
       <el-tab-pane v-for="g in productPivots" :key="g.productGroupName" :name="g.productGroupName" lazy>
         <template #label>
           <span>{{ g.productGroupName }}</span>
@@ -229,6 +218,24 @@ onMounted(async () => {
       </el-tab-pane>
     </el-tabs>
     <el-empty v-if="!loading && !productPivots.length" description="没有符合条件的发料记录" />
+
+    <!-- 汇总放在 tab 下面，不管当前点开的是哪个产品的 tab 都能看到——不用切到某个专门的
+         "汇总" tab 才看得到总览 -->
+    <div v-if="productSummaryRows.length" class="summary-section">
+      <h3 class="summary-title">汇总</h3>
+      <el-table :data="productSummaryRows" size="small" border show-summary :summary-method="summaryOverviewMethod">
+        <el-table-column prop="productGroupName" label="产品" min-width="160" />
+        <el-table-column label="物料种类" width="110" align="right">
+          <template #default="{ row }">{{ row.materialCount }} 种</template>
+        </el-table-column>
+        <el-table-column label="收料天数" width="110" align="right">
+          <template #default="{ row }">{{ row.dayCount }} 天</template>
+        </el-table-column>
+        <el-table-column label="合计重量(斤)" width="140" align="right">
+          <template #default="{ row }">{{ row.totalWeightJin.toLocaleString() }}</template>
+        </el-table-column>
+      </el-table>
+    </div>
   </div>
 </template>
 
@@ -253,6 +260,15 @@ onMounted(async () => {
 .product-sub {
   color: #909399;
   font-size: 13px;
+}
+
+.summary-section {
+  margin-top: 24px;
+}
+
+.summary-title {
+  margin: 0 0 10px;
+  font-size: 15px;
 }
 
 .pivot-wrap {
