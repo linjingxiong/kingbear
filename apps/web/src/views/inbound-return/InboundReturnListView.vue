@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import dayjs from "dayjs";
 import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions } from "element-plus";
 import {
   calculateQuantity,
@@ -55,9 +56,22 @@ const KIND_LABEL: Record<OutboundKind, string> = { issue: "发料", return: "退
 function kindLabel(kind: OutboundKind) {
   return KIND_LABEL[kind];
 }
-// 列表上方的类型筛选：空字符串 = 全部
+// 列表上方的筛选：类型（空字符串=全部）、玩具厂、出库日期区间——跟入库单列表同一套筛选，
+// 玩具厂默认选"美奇"、日期默认当月，不用每次自己选
 const kindFilter = ref<"" | OutboundKind>("");
-const filteredList = computed(() => (kindFilter.value ? list.value.filter((r) => r.kind === kindFilter.value) : list.value));
+const listFactoryFilter = ref("");
+const dateFrom = ref(dayjs().startOf("month").format("YYYY-MM-DD"));
+const dateTo = ref(dayjs().endOf("month").format("YYYY-MM-DD"));
+const filteredList = computed(() =>
+  list.value.filter((r) => {
+    if (kindFilter.value && r.kind !== kindFilter.value) return false;
+    if (listFactoryFilter.value && r.factoryId !== listFactoryFilter.value) return false;
+    const date = (r.returnDate ?? "").slice(0, 10);
+    if (dateFrom.value && date < dateFrom.value) return false;
+    if (dateTo.value && date > dateTo.value) return false;
+    return true;
+  }),
+);
 
 /**
  * 已经保存的记录里有没有疑似重复的——跟录入时"这一批还没提交的行互相比对"、保存时"跟数据库
@@ -594,6 +608,9 @@ async function handleDelete(row: InboundReturnListItem) {
 onMounted(async () => {
   checkDraft();
   factories.value = await listFactories();
+  // 默认优先选"美奇"，列表里没有的话（比如换了环境）就不选，不会白屏选不出来
+  const preferred = factories.value.find((f) => f.name === "美奇");
+  if (preferred) listFactoryFilter.value = preferred.id;
   load();
 });
 </script>
@@ -621,6 +638,16 @@ onMounted(async () => {
         <el-radio-button value="issue">发料</el-radio-button>
         <el-radio-button value="return">退货</el-radio-button>
       </el-radio-group>
+    </div>
+
+    <!-- 玩具厂/日期筛选，跟入库单列表同一套：玩具厂默认美奇、日期默认当月 -->
+    <div class="filter-bar">
+      <el-select v-model="listFactoryFilter" clearable filterable placeholder="全部玩具厂" style="width: 180px">
+        <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
+      </el-select>
+      <el-date-picker v-model="dateFrom" type="date" placeholder="起" value-format="YYYY-MM-DD" style="width: 140px" />
+      <span class="filter-sep">至</span>
+      <el-date-picker v-model="dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" />
     </div>
 
     <el-alert v-if="draftAvailable" type="warning" :closable="false" show-icon style="margin-bottom: 12px">
@@ -874,6 +901,17 @@ onMounted(async () => {
   margin-bottom: 12px;
   display: flex;
   gap: 12px;
+}
+.filter-bar {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.filter-sep {
+  color: #909399;
+  font-size: 13px;
 }
 .thumb {
   width: 24px;
