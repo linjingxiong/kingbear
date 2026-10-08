@@ -744,8 +744,8 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label-width="0">
           <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会乱换行错位。
-               表头不管发料还是退货都一样（产品/类型/重量/克重/数量/备注），哪个字段这一行用
-               不上就显示"-"，不会因为切换类型而整张表的列忽多忽少 -->
+               表头不管发料还是退货都一样（类型/产品/货号·物料/重量/克重/数量/算出数量/操作），
+               哪个字段这一行用不上就显示"-"，不会因为切换类型而整张表的列忽多忽少 -->
           <el-alert v-if="duplicateGroups.length" type="warning" show-icon :closable="false" class="dup-alert">
             <template #title>这批里有 {{ duplicateGroups.length }} 组疑似重复，对应的行已经标红</template>
             <div v-for="g in duplicateGroups" :key="g.key" class="dup-item">
@@ -754,7 +754,6 @@ onMounted(async () => {
           </el-alert>
           <div class="rows-editor">
             <div class="rows-grid rows-grid--header">
-              <span class="col-label">操作</span>
               <span class="col-label">类型</span>
               <span class="col-label">产品</span>
               <span class="col-label">货号 / 物料</span>
@@ -762,7 +761,7 @@ onMounted(async () => {
               <span class="col-label">克重(g)</span>
               <span class="col-label">数量</span>
               <span class="col-label">算出数量</span>
-              <span class="col-label">备注</span>
+              <span class="col-label">操作</span>
             </div>
             <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
                  产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
@@ -773,9 +772,6 @@ onMounted(async () => {
               class="rows-grid"
               :class="{ 'rows-grid--duplicate': duplicateRowIndexes.has(idx) }"
             >
-              <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
-              <span v-else class="muted col-dash">-</span>
-
               <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对——放在
                    最前面，一打开就能先定好类型，再填后面跟着这个类型变化的字段 -->
               <el-select v-model="row.kind" style="width: 100%" :class="{ 'kind-select--return': row.kind === 'return' }">
@@ -821,7 +817,7 @@ onMounted(async () => {
                 <el-option v-for="name in materialOptionsFor(row)" :key="name" :label="name" :value="name" />
               </el-select>
 
-              <el-input-number v-model="row.weightJin" :min="0" :precision="3" controls-position="right" style="width: 100%" />
+              <el-input-number v-model="row.weightJin" :min="0" :precision="3" :controls="false" style="width: 100%" />
 
               <el-input-number
                 v-if="row.kind === 'return'"
@@ -853,7 +849,8 @@ onMounted(async () => {
               </span>
               <span v-else class="muted col-dash">-</span>
 
-              <el-input v-model="row.reason" :placeholder="row.kind === 'return' ? '比如：破损/色差' : '选填'" />
+              <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
+              <span v-else class="muted col-dash">-</span>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
@@ -989,13 +986,13 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  /* 操作 / 类型 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 备注——
+  /* 类型 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 操作——
      不管发料还是退货都是这一套列，用不上的格子显示"-"，不会因为切换类型列忽多忽少 */
-  grid-template-columns: 60px 90px 130px 180px 95px 95px 95px 80px 120px;
+  grid-template-columns: 90px 130px 180px 95px 95px 95px 80px 60px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  min-width: 1000px;
+  min-width: 880px;
 }
 
 /* 选了"退货"的那一行，类型下拉框变红，一眼看出哪几行会从应收里扣钱 */
