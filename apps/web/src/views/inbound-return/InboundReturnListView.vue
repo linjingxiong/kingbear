@@ -31,17 +31,19 @@ import { useImageZoomPan } from "../../composables/useImageZoomPan";
 // "退货"：不合格的成品/半成品退回来，按货号记（跟入库单同一套字段），会从应收账单里扣。
 // 这个页面最早只管退货，后来把发料也做进来，文件名/接口名沿用没改，库里的老记录都是退货
 //（没有 kind 字段的当退货处理）。
-// 出库单预览图：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互
-// （模板里 ref 只有作为顶层 setup 绑定才会自动解包，所以这里解构出来，不要整个对象一起传）
-const {
-  zoomLevel: slipZoomLevel,
-  isDragging: slipDragging,
-  style: slipStyle,
-  reset: resetSlipZoom,
-  onWheel: onSlipWheel,
-  onMouseDown: onSlipMouseDown,
-  onClick: onSlipClick,
-} = useImageZoomPan();
+// 出库单预览图：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互。
+// 发料单导入支持一次选好几张图（同一张单拍了好几页），每张图各自独立缩放/平移，
+// 所以不是只建一份状态，是按图片在数组里的下标各建一份、缓存起来（useImageZoomPan
+// 内部只用了 ref/computed，不依赖 setup() 的调用时机，这样按需创建是安全的）
+const slipZoomStates = new Map<number, ReturnType<typeof useImageZoomPan>>();
+function slipZoomStateFor(idx: number) {
+  if (!slipZoomStates.has(idx)) slipZoomStates.set(idx, useImageZoomPan());
+  return slipZoomStates.get(idx)!;
+}
+function resetSlipZoomStates() {
+  for (const s of slipZoomStates.values()) s.reset();
+  slipZoomStates.clear();
+}
 
 const factories = ref<FactoryListItem[]>([]);
 const productsByFactory = ref<Product[]>([]);
@@ -256,7 +258,8 @@ const form = reactive({
   factoryId: "",
   returnDate: "",
   remark: "",
-  imageUrl: "",
+  // 发料单可能一张单拍好几张照片才拍全，支持导入时多选；退货单还是一次一张
+  imageUrls: [] as string[],
   rows: [] as RowItem[],
 });
 const uploading = ref(false);
@@ -279,7 +282,7 @@ function formHasContent() {
     form.factoryId ||
     form.returnDate ||
     form.remark ||
-    form.imageUrl ||
+    form.imageUrls.length ||
     form.rows.some(
       (r) =>
         r.productId ||
@@ -329,7 +332,8 @@ async function restoreDraft() {
       factoryId: d.factoryId ?? "",
       returnDate: d.returnDate ?? "",
       remark: d.remark ?? "",
-      imageUrl: d.imageUrl ?? "",
+      // 改版之前存下的草稿是单张图（imageUrl 字符串），兼容一下，不然老草稿的图会丢
+      imageUrls: Array.isArray(d.imageUrls) ? d.imageUrls : d.imageUrl ? [d.imageUrl] : [],
       // 改版之前存下的草稿没有 kind（那时候只有退货），恢复出来就当退货，别悄悄变成发料
       rows:
         Array.isArray(d.rows) && d.rows.length
@@ -350,8 +354,8 @@ async function discardDraft() {
 watch(form, saveDraft, { deep: true });
 // 图片换了（新建/识别/编辑/恢复草稿）就把缩放平移状态清掉，不然带着上一张图的缩放状态显示新图
 watch(
-  () => form.imageUrl,
-  () => resetSlipZoom(),
+  () => form.imageUrls,
+  () => resetSlipZoomStates(),
 );
 watch(dialogVisible, (open) => {
   if (!open) checkDraft();
@@ -362,7 +366,7 @@ function resetForm() {
     factoryId: "",
     returnDate: "",
     remark: "",
-    imageUrl: "",
+    imageUrls: [],
     rows: [],
   });
   lastIssueProductGroupId.value = "";
@@ -393,7 +397,7 @@ async function openEdit(row: InboundReturnListItem) {
     factoryId: row.factoryId,
     returnDate: (row.returnDate ?? "").slice(0, 10),
     remark: row.remark ?? "",
-    imageUrl: row.images[0] ?? "",
+    imageUrls: row.images ?? [],
     rows: [
       {
         kind: row.kind ?? "return",
@@ -447,7 +451,7 @@ async function onReturnOcrUpload(options: UploadRequestOptions) {
     dialogMode.value = "create";
     editingId.value = null;
     resetForm();
-    form.imageUrl = r.imageUrl;
+    form.imageUrls = [r.imageUrl];
 
     if (r.factoryName) {
       const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
@@ -482,33 +486,61 @@ async function onReturnOcrUpload(options: UploadRequestOptions) {
 
 // 拍照识别·发料：发的是原材料，识别模板跟退货完全不一样（物料名称+重量，没有货号/克重），
 // 走单独的接口，识别到的行直接是"发料"，不用猜类型
-async function onIssueOcrUpload(options: UploadRequestOptions) {
+const issueFileInputRef = ref<HTMLInputElement>();
+
+function triggerIssueFilePicker() {
+  issueFileInputRef.value?.click();
+}
+
+// 原生 <input type="file" multiple> 选完文件一次性拿到整个 FileList，自己控制挨个识别、
+// 把结果合并进同一张表——el-upload 组件选多个文件时是每个文件各自独立触发一次上传回调，
+// 协调不了"这是同一批、要合在一起"，所以这个按钮不用 el-upload，换成这个
+async function onIssueFilesSelected(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const files = input.files ? Array.from(input.files) : [];
+  input.value = ""; // 清空，不然连续两次选同一批文件，第二次不会触发 change
+  if (files.length) await importIssueFiles(files);
+}
+
+// 拍照识别·发料：一张出库单纸写得多，经常要拍好几张才拍全，支持一次选多张图——逐张识别，
+// 识别出来的行全部合并进同一张表；玩具厂/日期只认第一张识别出来的（几张图本来就是同一张单）
+async function importIssueFiles(files: File[]) {
   uploading.value = true;
   try {
-    const r = await recognizeOutboundIssue(options.file as File);
     dialogMode.value = "create";
     editingId.value = null;
     resetForm();
-    form.imageUrl = r.imageUrl;
 
-    if (r.factoryName) {
-      const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
-      // 发料行不用选货号，这里仍然拉一下这个厂的产品列表——万一某一行手动改成"退货"，
-      // 货号下拉能马上有选项，不用等用户重新碰一下玩具厂选择框才触发加载。产品清单也一起拉，
-      // 方便识别完之后逐行补选"这批料是哪个产品的"
-      if (f) {
-        form.factoryId = f.id;
-        await Promise.all([loadProducts(f.id), loadProductGroups(f.id)]);
+    const imageUrls: string[] = [];
+    const rows: RowItem[] = [];
+    let headerFilled = false;
+    for (const file of files) {
+      const r = await recognizeOutboundIssue(file);
+      imageUrls.push(r.imageUrl);
+      if (!headerFilled) {
+        if (r.factoryName) {
+          const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
+          // 发料行不用选货号，这里仍然拉一下这个厂的产品列表——万一某一行手动改成"退货"，
+          // 货号下拉能马上有选项，不用等用户重新碰一下玩具厂选择框才触发加载。产品清单也一起拉，
+          // 方便识别完之后逐行补选"这批料是哪个产品的"
+          if (f) {
+            form.factoryId = f.id;
+            await Promise.all([loadProducts(f.id), loadProductGroups(f.id)]);
+          }
+        }
+        if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
+        headerFilled = true;
       }
+      for (const it of r.items) rows.push({ ...blankRow("issue"), materialName: it.materialName, weightJin: it.weightJin });
     }
-    if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
 
-    form.rows = r.items.length
-      ? r.items.map((it) => ({ ...blankRow("issue"), materialName: it.materialName, weightJin: it.weightJin }))
-      : [blankRow("issue")];
+    form.imageUrls = imageUrls;
+    form.rows = rows.length ? rows : [blankRow("issue")];
 
     dialogVisible.value = true;
-    ElMessage.success("识别完成，请核对后保存");
+    ElMessage.success(
+      files.length > 1 ? `${files.length} 张图识别完成，共 ${rows.length} 行，请核对后保存` : "识别完成，请核对后保存",
+    );
   } finally {
     uploading.value = false;
   }
@@ -569,7 +601,7 @@ async function handleSubmit() {
         returnDate: form.returnDate,
         reason: row.reason,
         remark: form.remark,
-        images: form.imageUrl ? [form.imageUrl] : [],
+        images: form.imageUrls,
       };
       await submitWithDuplicateConfirm(dto, createInboundReturn);
     }
@@ -617,12 +649,14 @@ onMounted(async () => {
       <el-button type="primary" @click="openCreate">新增出库单</el-button>
       <!-- 发料、退货是两种完全不同的单据（发料只有物料名+重量，退货是货号那一套），
            识别模板不一样，拆成两个导入入口，不用再靠关键词猜这一行到底是哪种 -->
-      <el-upload :show-file-list="false" accept="image/*" :http-request="onIssueOcrUpload" :disabled="uploading">
-        <el-button :loading="uploading">
-          <el-icon><Plus /></el-icon>
-          导入发料单图片
-        </el-button>
-      </el-upload>
+      <!-- 发料单一张纸经常要拍好几张照片才拍全，用原生 input 支持一次多选，选完的几张
+           图挨个识别、结果合并进同一张单（不用 el-upload——它选多个文件是各自独立触发，
+           协调不了合并逻辑，见 importIssueFiles 的注释） -->
+      <input ref="issueFileInputRef" type="file" accept="image/*" multiple class="hidden-file-input" @change="onIssueFilesSelected" />
+      <el-button :loading="uploading" @click="triggerIssueFilePicker">
+        <el-icon><Plus /></el-icon>
+        导入发料单图片（可多选）
+      </el-button>
       <el-upload :show-file-list="false" accept="image/*" :http-request="onReturnOcrUpload" :disabled="uploading">
         <el-button :loading="uploading">
           <el-icon><Plus /></el-icon>
@@ -849,18 +883,26 @@ onMounted(async () => {
         </el-form-item>
       </el-form>
 
-      <!-- 单据原图放在明细下面，居中一个固定框——跟入库确认页的图片位置统一 -->
-      <div v-if="form.imageUrl" class="image-panel">
-        <div
-          class="slip-frame"
-          :class="{ 'slip-frame--zoomed': slipZoomLevel > 1, 'slip-frame--dragging': slipDragging }"
-          @click="onSlipClick"
-          @wheel.prevent="onSlipWheel"
-          @mousedown="onSlipMouseDown"
-        >
-          <img :src="form.imageUrl" class="slip-preview-img" :style="slipStyle" draggable="false" />
+      <!-- 单据原图放在明细下面，居中摆一个固定框——跟入库确认页的图片位置统一。
+           发料单可能一次导入了好几张图（同一张单拍了好几页），每张图各自独立缩放/平移 -->
+      <div v-if="form.imageUrls.length" class="image-panel">
+        <div v-for="(url, idx) in form.imageUrls" :key="url" class="image-panel-item">
+          <div
+            class="slip-frame"
+            :class="{
+              'slip-frame--zoomed': slipZoomStateFor(idx).zoomLevel.value > 1,
+              'slip-frame--dragging': slipZoomStateFor(idx).isDragging.value,
+            }"
+            @click="slipZoomStateFor(idx).onClick"
+            @wheel.prevent="slipZoomStateFor(idx).onWheel"
+            @mousedown="slipZoomStateFor(idx).onMouseDown"
+          >
+            <img :src="url" class="slip-preview-img" :style="slipZoomStateFor(idx).style.value" draggable="false" />
+          </div>
+          <div class="slip-hint">
+            {{ form.imageUrls.length > 1 ? `第 ${idx + 1} 张 · ` : "" }}滚轮缩放、拖拽平移，对着原图核对识别结果
+          </div>
         </div>
-        <div class="slip-hint">滚轮缩放、拖拽平移，对着原图核对识别结果</div>
       </div>
 
       <template #footer>
@@ -876,6 +918,9 @@ onMounted(async () => {
   margin-bottom: 12px;
   display: flex;
   gap: 12px;
+}
+.hidden-file-input {
+  display: none;
 }
 .filter-bar {
   margin-bottom: 12px;
@@ -901,7 +946,14 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 20px;
   margin-top: 16px;
+}
+
+.image-panel-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .slip-hint {
