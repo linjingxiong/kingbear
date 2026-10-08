@@ -192,6 +192,19 @@ function blankRow(kind: OutboundKind = "issue"): RowItem {
   };
 }
 
+// form 要挪到这几个查重/分组 computed 前面声明：下面 pendingGroups 上挂的 watch() 一声明
+// 就会同步跑一次取初始值（不是只有 immediate:true 才会跑），这条链会一路连到 renderGroups
+// 再读到 form.imageUrls/form.rows——如果 form 还声明在文件后面，这时候就会命中 const 的
+// 暂时性死区，报"Cannot access 'form' before initialization"（线上刷出来的白屏就是这个）
+const form = reactive({
+  factoryId: "",
+  returnDate: "",
+  remark: "",
+  // 发料单可能一张单拍好几张照片才拍全，支持导入时多选；退货单还是一次一张
+  imageUrls: [] as string[],
+  rows: [] as RowItem[],
+});
+
 /**
  * 这一批里有没有手滑录重的：同样是发料，物料名称+重量一样；同样是退货，货号+数量一样，
  * 大概率是同一行被多录了一遍（比如拍照识别把手写的一行拆成两行，或者手动加行的时候点重了）。
@@ -348,14 +361,6 @@ const dialogVisible = ref(false);
 const dialogMode = ref<"create" | "edit">("create");
 const editingId = ref<string | null>(null);
 const formRef = ref<FormInstance>();
-const form = reactive({
-  factoryId: "",
-  returnDate: "",
-  remark: "",
-  // 发料单可能一张单拍好几张照片才拍全，支持导入时多选；退货单还是一次一张
-  imageUrls: [] as string[],
-  rows: [] as RowItem[],
-});
 const uploading = ref(false);
 // 记着这批发料最近一次选的产品，新增行、批量识别出来的空产品行都直接带上这个默认值——
 // 不用同一个产品在每一行都重选一遍；每次重新开一张新出库单（resetForm）就清空，不会带到下一张单上
