@@ -746,7 +746,11 @@ onMounted(async () => {
             </div>
           </el-alert>
           <div class="rows-editor">
+            <!-- "操作"（删除）放最前面：列一多要横向滚动，放在最后找半天找不到（之前用 sticky
+                 钉在右边，结果把挨着它的"类型""原因"两列挡住了，比滚不到还糟），放最前面
+                 不管滚到哪里都在眼前，不用任何 CSS 特技 -->
             <div class="rows-grid rows-grid--header" :class="{ 'rows-grid--compact': !hasReturnRows }">
+              <span class="col-label">操作</span>
               <span class="col-label">产品</span>
               <span class="col-label">货号 / 物料</span>
               <span class="col-label col-label--required">重量(斤)</span>
@@ -757,7 +761,6 @@ onMounted(async () => {
               </template>
               <span class="col-label">类型</span>
               <span class="col-label">原因</span>
-              <span class="col-label col-label--sticky">操作</span>
             </div>
             <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
                  产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
@@ -768,6 +771,9 @@ onMounted(async () => {
               class="rows-grid"
               :class="{ 'rows-grid--compact': !hasReturnRows, 'rows-grid--duplicate': duplicateRowIndexes.has(idx) }"
             >
+              <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
+              <span v-else class="muted col-dash">-</span>
+
               <el-select
                 v-if="row.kind === 'issue'"
                 v-model="row.productGroupId"
@@ -846,16 +852,6 @@ onMounted(async () => {
                 <el-option label="退货" value="return" />
               </el-select>
               <el-input v-model="row.reason" :placeholder="row.kind === 'return' ? '比如：破损/色差' : '选填'" />
-              <el-button
-                v-if="dialogMode === 'create'"
-                link
-                type="danger"
-                class="row-action-sticky"
-                :class="{ 'row-action-sticky--duplicate': duplicateRowIndexes.has(idx) }"
-                @click="removeRow(idx)"
-              >
-                删除
-              </el-button>
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
@@ -981,9 +977,9 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  /* 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 类型 / 原因 / 操作——
+  /* 操作 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 类型 / 原因——
      这批里只要还有一行是退货，就用这套完整的 9 列 */
-  grid-template-columns: 130px 180px 95px 95px 95px 80px 90px 120px 60px;
+  grid-template-columns: 60px 130px 180px 95px 95px 95px 80px 90px 120px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
@@ -991,9 +987,9 @@ onMounted(async () => {
 }
 
 /* 这批全是发料，克重/数量/算出数量三列用不上，直接不占地方：
-   产品 / 物料 / 重量 / 类型 / 原因 / 操作，6 列 */
+   操作 / 产品 / 物料 / 重量 / 类型 / 原因，6 列 */
 .rows-grid--compact {
-  grid-template-columns: 160px 220px 100px 90px 140px 60px;
+  grid-template-columns: 60px 160px 220px 100px 90px 140px;
   min-width: 800px;
 }
 
@@ -1057,26 +1053,6 @@ onMounted(async () => {
   margin-right: 2px;
 }
 
-/* 列数多的时候（尤其退货那套字段都摊开时）横向要滚动才看得到最后一列，删除按钮
-   跟着滚出视野外找不到了——把"操作"这一列钉在横向滚动容器的右边缘，滚到哪儿都看得见，
-   不用先划到最右边才能删一行 */
-.col-label--sticky {
-  position: sticky;
-  right: 0;
-  background: #fff;
-  padding-left: 6px;
-}
-
-.row-action-sticky {
-  position: sticky;
-  right: 0;
-  background: #fff;
-  padding-left: 6px !important;
-}
-
-.row-action-sticky--duplicate {
-  background: #fef0f0;
-}
 
 /* 窄屏放不下两栏，图片挪到上面、明细挪到下面各占整行，图片钉住那套逻辑
    在窄屏上意义不大（本来也要整个弹窗一起滚），干脆退回自然排版 */
