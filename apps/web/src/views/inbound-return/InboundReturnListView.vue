@@ -186,10 +186,6 @@ function blankRow(kind: OutboundKind = "issue"): RowItem {
   };
 }
 
-// 出库单里的行是发料还是退货混着——发料要看是不是全都不需要克重/数量这些字段，
-// 全都是发料的时候，表单里那几列直接不显示，省得看着一堆用不上的"-"
-const hasReturnRows = computed(() => form.rows.some((r) => r.kind === "return"));
-
 /**
  * 这一批里有没有手滑录重的：同样是发料，物料名称+重量一样；同样是退货，货号+数量一样，
  * 大概率是同一行被多录了一遍（比如拍照识别把手写的一行拆成两行，或者手动加行的时候点重了）。
@@ -733,39 +729,23 @@ onMounted(async () => {
     <el-dialog
       v-model="dialogVisible"
       :title="dialogMode === 'create' ? '新增出库单' : '编辑出库单'"
-      :width="form.imageUrl ? 'min(1360px, 97vw)' : 'min(980px, 95vw)'"
+      width="min(1100px, 96vw)"
     >
-      <!-- 识别不准的时候要对着原图逐行核对，图片跟货号明细分两栏：图片这一栏钉在左边不跟着动，
-           右边的明细自己滚，不会出现"看一眼图片、往下滚一下、图片就跑没了"的问题 -->
-      <div class="dialog-body" :class="{ 'dialog-body--split': form.imageUrl }">
-        <div v-if="form.imageUrl" class="image-col">
-          <div
-            class="slip-frame"
-            :class="{ 'slip-frame--zoomed': slipZoomLevel > 1, 'slip-frame--dragging': slipDragging }"
-            @click="onSlipClick"
-            @wheel.prevent="onSlipWheel"
-            @mousedown="onSlipMouseDown"
-          >
-            <img :src="form.imageUrl" class="slip-preview-img" :style="slipStyle" draggable="false" />
-          </div>
-          <div class="slip-hint">滚轮缩放、拖拽平移，对着原图核对识别结果</div>
-        </div>
-
-        <el-form ref="formRef" :model="form" :rules="rules" label-width="90px" class="fields-col">
-          <el-form-item label="玩具厂" prop="factoryId">
-            <el-select v-model="form.factoryId" filterable style="width: 100%" @change="onFactoryChange">
-              <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="出库日期" prop="returnDate">
-            <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="货号明细">
-          <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会
-               乱换行错位。重量(斤)/克重(g) 换算出来的"算出数量"直接摆一列常显——跟数量
-               对不上就是红色，不用悬浮/点击才能看到，一眼就能核对是不是录错了。
-               克重(g)/数量/算出数量只有退货用得到，这一批要是全是发料，这三列就不显示，
-               不用看一堆用不上的"-" -->
+      <!-- 跟入库确认页同一个排版：表单+明细在上面，单据原图在下面居中摆一个固定框——
+           两边位置统一了，不用对着不同页面找不同地方看图 -->
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
+        <el-form-item label="玩具厂" prop="factoryId">
+          <el-select v-model="form.factoryId" filterable style="width: 100%" @change="onFactoryChange">
+            <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="出库日期" prop="returnDate">
+          <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="货号明细">
+          <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会乱换行错位。
+               表头不管发料还是退货都一样（产品/类型/重量/克重/数量/备注），哪个字段这一行用
+               不上就显示"-"，不会因为切换类型而整张表的列忽多忽少 -->
           <el-alert v-if="duplicateGroups.length" type="warning" show-icon :closable="false" class="dup-alert">
             <template #title>这批里有 {{ duplicateGroups.length }} 组疑似重复，对应的行已经标红</template>
             <div v-for="g in duplicateGroups" :key="g.key" class="dup-item">
@@ -773,21 +753,16 @@ onMounted(async () => {
             </div>
           </el-alert>
           <div class="rows-editor">
-            <!-- "操作"（删除）放最前面：列一多要横向滚动，放在最后找半天找不到（之前用 sticky
-                 钉在右边，结果把挨着它的"类型""原因"两列挡住了，比滚不到还糟），放最前面
-                 不管滚到哪里都在眼前，不用任何 CSS 特技 -->
-            <div class="rows-grid rows-grid--header" :class="{ 'rows-grid--compact': !hasReturnRows }">
+            <div class="rows-grid rows-grid--header">
               <span class="col-label">操作</span>
+              <span class="col-label">类型</span>
               <span class="col-label">产品</span>
               <span class="col-label">货号 / 物料</span>
               <span class="col-label col-label--required">重量(斤)</span>
-              <template v-if="hasReturnRows">
-                <span class="col-label">克重(g)</span>
-                <span class="col-label">数量</span>
-                <span class="col-label">算出数量</span>
-              </template>
-              <span class="col-label">类型</span>
-              <span class="col-label">原因</span>
+              <span class="col-label">克重(g)</span>
+              <span class="col-label">数量</span>
+              <span class="col-label">算出数量</span>
+              <span class="col-label">备注</span>
             </div>
             <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
                  产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
@@ -796,10 +771,17 @@ onMounted(async () => {
               v-for="(row, idx) in form.rows"
               :key="idx"
               class="rows-grid"
-              :class="{ 'rows-grid--compact': !hasReturnRows, 'rows-grid--duplicate': duplicateRowIndexes.has(idx) }"
+              :class="{ 'rows-grid--duplicate': duplicateRowIndexes.has(idx) }"
             >
               <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
               <span v-else class="muted col-dash">-</span>
+
+              <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对——放在
+                   最前面，一打开就能先定好类型，再填后面跟着这个类型变化的字段 -->
+              <el-select v-model="row.kind" style="width: 100%" :class="{ 'kind-select--return': row.kind === 'return' }">
+                <el-option label="发料" value="issue" />
+                <el-option label="退货" value="return" />
+              </el-select>
 
               <el-select
                 v-if="row.kind === 'issue'"
@@ -841,53 +823,60 @@ onMounted(async () => {
 
               <el-input-number v-model="row.weightJin" :min="0" :precision="3" controls-position="right" style="width: 100%" />
 
-              <template v-if="hasReturnRows">
-                <el-input-number
-                  v-if="row.kind === 'return'"
-                  v-model="row.unitWeightG"
-                  :min="0"
-                  :precision="3"
-                  controls-position="right"
-                  style="width: 100%"
-                />
-                <span v-else class="muted col-dash">-</span>
+              <el-input-number
+                v-if="row.kind === 'return'"
+                v-model="row.unitWeightG"
+                :min="0"
+                :precision="3"
+                controls-position="right"
+                style="width: 100%"
+              />
+              <span v-else class="muted col-dash">-</span>
 
-                <el-input-number
-                  v-if="row.kind === 'return'"
-                  v-model="row.qtyDeclared"
-                  :min="0"
-                  controls-position="right"
-                  style="width: 100%"
-                />
-                <span v-else class="muted col-dash">-</span>
+              <el-input-number
+                v-if="row.kind === 'return'"
+                v-model="row.qtyDeclared"
+                :min="0"
+                controls-position="right"
+                style="width: 100%"
+              />
+              <span v-else class="muted col-dash">-</span>
 
-                <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，只有退货用得到——发料只按重量记，
-                     没有件数这回事 -->
-                <span
-                  v-if="row.kind === 'return'"
-                  class="calc-qty"
-                  :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }"
-                >
-                  {{ qtyCalculated(row) }}
-                </span>
-                <span v-else class="muted col-dash">-</span>
-              </template>
+              <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，只有退货用得到——发料只按重量记，
+                   没有件数这回事 -->
+              <span
+                v-if="row.kind === 'return'"
+                class="calc-qty"
+                :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }"
+              >
+                {{ qtyCalculated(row) }}
+              </span>
+              <span v-else class="muted col-dash">-</span>
 
-              <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对 -->
-              <el-select v-model="row.kind" style="width: 100%" :class="{ 'kind-select--return': row.kind === 'return' }">
-                <el-option label="发料" value="issue" />
-                <el-option label="退货" value="return" />
-              </el-select>
               <el-input v-model="row.reason" :placeholder="row.kind === 'return' ? '比如：破损/色差' : '选填'" />
             </div>
             <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
         </el-form-item>
-          <el-form-item label="备注">
-            <el-input v-model="form.remark" type="textarea" :rows="2" />
-          </el-form-item>
-        </el-form>
+        <el-form-item label="备注">
+          <el-input v-model="form.remark" type="textarea" :rows="2" />
+        </el-form-item>
+      </el-form>
+
+      <!-- 单据原图放在明细下面，居中一个固定框——跟入库确认页的图片位置统一 -->
+      <div v-if="form.imageUrl" class="image-panel">
+        <div
+          class="slip-frame"
+          :class="{ 'slip-frame--zoomed': slipZoomLevel > 1, 'slip-frame--dragging': slipDragging }"
+          @click="onSlipClick"
+          @wheel.prevent="onSlipWheel"
+          @mousedown="onSlipMouseDown"
+        >
+          <img :src="form.imageUrl" class="slip-preview-img" :style="slipStyle" draggable="false" />
+        </div>
+        <div class="slip-hint">滚轮缩放、拖拽平移，对着原图核对识别结果</div>
       </div>
+
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit">保存</el-button>
@@ -920,28 +909,13 @@ onMounted(async () => {
   cursor: zoom-in;
   vertical-align: middle;
 }
-/* 有原图的时候，弹窗分左右两栏：左边图片钉住不动，右边货号明细自己滚——
-   识别不准要对着图片逐行核对时，图片不会跟着滚动条一起跑掉。没有图片（纯手工新增）
-   就还是原来单栏的样子，不用为了对齐两栏硬留一块空白 */
-.dialog-body--split {
+/* 单据原图放在货号明细下面，居中摆一个固定尺寸的框——跟入库确认页的图片位置、
+   尺寸统一，不用对着不同页面找不同地方看图 */
+.image-panel {
   display: flex;
-  gap: 20px;
-  align-items: flex-start;
-}
-
-.image-col {
-  flex: 0 0 460px;
-  position: sticky;
-  top: 0;
-}
-
-.fields-col {
-  flex: 1;
-  min-width: 0;
-  /* 右边这一栏自己滚，弹窗本身不用跟着变得超长——图片始终留在视口里 */
-  max-height: 75vh;
-  overflow-y: auto;
-  padding-right: 4px;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 16px;
 }
 
 .slip-hint {
@@ -953,12 +927,12 @@ onMounted(async () => {
 
 /* 出库单预览：滚轮缩放 + 拖拽平移，跟入库确认页/成品回收单据图片同一套交互，
    固定尺寸的框 + overflow:hidden 裁掉超出部分，交互事件绑在框上（不是图片本身）——
-   图片实际渲染尺寸经常比框小，事件只挂图片上的话空白区域滚轮/拖拽会没反应。
-   分栏之后图片单独占一整列，尺寸比原来单栏挤在表单里时大不少，字迹能看得更清楚 */
+   图片实际渲染尺寸经常比框小，事件只挂图片上的话空白区域滚轮/拖拽会没反应 */
 .slip-frame {
   position: relative;
-  width: 100%;
-  height: min(640px, 75vh);
+  width: 640px;
+  height: 480px;
+  max-width: 100%;
   border: 1px solid #ebeef5;
   border-radius: 4px;
   overflow: hidden;
@@ -1015,20 +989,13 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  /* 操作 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 类型 / 原因——
-     这批里只要还有一行是退货，就用这套完整的 9 列 */
-  grid-template-columns: 60px 130px 180px 95px 95px 95px 80px 90px 120px;
+  /* 操作 / 类型 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 备注——
+     不管发料还是退货都是这一套列，用不上的格子显示"-"，不会因为切换类型列忽多忽少 */
+  grid-template-columns: 60px 90px 130px 180px 95px 95px 95px 80px 120px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  min-width: 970px;
-}
-
-/* 这批全是发料，克重/数量/算出数量三列用不上，直接不占地方：
-   操作 / 产品 / 物料 / 重量 / 类型 / 原因，6 列 */
-.rows-grid--compact {
-  grid-template-columns: 60px 160px 220px 100px 90px 140px;
-  min-width: 800px;
+  min-width: 1000px;
 }
 
 /* 选了"退货"的那一行，类型下拉框变红，一眼看出哪几行会从应收里扣钱 */
@@ -1091,27 +1058,10 @@ onMounted(async () => {
   margin-right: 2px;
 }
 
-
-/* 窄屏放不下两栏，图片挪到上面、明细挪到下面各占整行，图片钉住那套逻辑
-   在窄屏上意义不大（本来也要整个弹窗一起滚），干脆退回自然排版 */
-@media (max-width: 900px) {
-  .dialog-body--split {
-    flex-direction: column;
-  }
-
-  .image-col {
-    flex-basis: auto;
-    width: 100%;
-    position: static;
-  }
-
-  .fields-col {
-    max-height: none;
-    overflow-y: visible;
-  }
-
+/* 窄屏（手机）下固定 640px 的图片框放不下，缩小一点、靠 max-width:100% 自适应 */
+@media (max-width: 680px) {
   .slip-frame {
-    height: 260px;
+    height: 360px;
   }
 }
 </style>
