@@ -14,7 +14,7 @@ import {
 } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { listProductsByFactory } from "../../api/product";
-import { listProductGroupsByFactory } from "../../api/product-group";
+import { listProductGroupsByFactory, updateProductGroup } from "../../api/product-group";
 import { submitWithDuplicateConfirm } from "../../utils/duplicate-confirm";
 import {
   createInboundReturn,
@@ -125,12 +125,20 @@ async function loadProductGroups(factoryId: string) {
   productGroups.value = factoryId ? await listProductGroupsByFactory(factoryId) : [];
 }
 
-/** 物料名称下拉的候选：这个玩具厂名下所有产品的物料清单合在一起（去重），不再要求先选产品——
- * 候选从"产品管理"里各产品维护的物料清单来，这里只读不写；选不到就直接打字 */
-function materialOptionsFor(): string[] {
-  const names = new Set<string>();
-  for (const g of productGroups.value) for (const m of g.materials) names.add(m.name);
-  return [...names];
+/** 这一行选了产品，物料下拉就是这个产品的物料清单；没选产品就没有下拉候选，还是能手打 */
+function materialOptionsFor(row: RowItem): string[] {
+  return productGroups.value.find((g) => g.id === row.productGroupId)?.materials.map((m) => m.name) ?? [];
+}
+
+/** 发料行填的物料名称，如果这个产品的物料清单里还没有，保存时顺手记进这个产品的物料清单，
+ * 下次同一个产品就能直接选了——跟"资产类型"名录是同一个思路 */
+async function ensureMaterialInGroup(row: RowItem) {
+  if (row.kind !== "issue" || !row.productGroupId) return;
+  const group = productGroups.value.find((g) => g.id === row.productGroupId);
+  const name = row.materialName.trim();
+  if (!group || !name || group.materials.some((m) => m.name === name)) return;
+  const updated = await updateProductGroup(group.id, { materials: [...group.materials, { name, unit: "" }] });
+  Object.assign(group, updated);
 }
 
 async function load() {
@@ -151,6 +159,8 @@ type RowItem = {
   productId: string;
   /** 发料专用：物料名称，原材料没有货号 */
   materialName: string;
+  /** 发料专用、选填：这批料是哪个产品用的 */
+  productGroupId: string;
   /** 重量(斤)：两种类型都用得到 */
   weightJin: number;
   /** 退货专用：单个克重(g)，用来从重量换算件数 */
@@ -167,6 +177,7 @@ function blankRow(kind: OutboundKind = "issue"): RowItem {
     kind,
     productId: "",
     materialName: "",
+    productGroupId: "",
     weightJin: 0,
     unitWeightG: 0,
     qtyDeclared: null,
@@ -212,6 +223,18 @@ const duplicateGroups = computed<DuplicateGroup[]>(() => {
 });
 const duplicateRowIndexes = computed(() => new Set(duplicateGroups.value.flatMap((g) => g.indexes)));
 
+// 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
+function onRowProductGroupChange(row: RowItem) {
+  row.materialName = "";
+  // 一批发料大多数是同一个产品，记住这次选的，后面新增的行直接带上、不用每行重选；
+  // 顺手把这一批里还没选产品的其他行也一起填上（比如拍照识别一次性出来一堆空产品的行），
+  // 已经手动选过别的产品的行不动，不会覆盖掉手动选择
+  lastIssueProductGroupId.value = row.productGroupId;
+  for (const r of form.rows) {
+    if (r !== row && r.kind === "issue" && !r.productGroupId) r.productGroupId = row.productGroupId;
+  }
+}
+
 function qtyCalculated(row: RowItem) {
   return calculateQuantity(row.weightJin, row.unitWeightG);
 }
@@ -237,6 +260,9 @@ const form = reactive({
   rows: [] as RowItem[],
 });
 const uploading = ref(false);
+// 记着这批发料最近一次选的产品，新增行、批量识别出来的空产品行都直接带上这个默认值——
+// 不用同一个产品在每一行都重选一遍；每次重新开一张新出库单（resetForm）就清空，不会带到下一张单上
+const lastIssueProductGroupId = ref("");
 
 const rules = {
   factoryId: [{ required: true, message: "请选择玩具厂", trigger: "change" }],
@@ -258,6 +284,7 @@ function formHasContent() {
       (r) =>
         r.productId ||
         r.materialName ||
+        r.productGroupId ||
         r.weightJin > 0 ||
         r.unitWeightG > 0 ||
         r.qtyDeclared ||
@@ -338,9 +365,11 @@ function resetForm() {
     imageUrl: "",
     rows: [],
   });
+  lastIssueProductGroupId.value = "";
 }
 function addRow() {
-  form.rows.push(blankRow());
+  // 新增的行直接带上这批最近选的产品，省得同一个产品每行都要重选一遍
+  form.rows.push({ ...blankRow(), productGroupId: lastIssueProductGroupId.value });
 }
 function removeRow(i: number) {
   form.rows.splice(i, 1);
@@ -370,6 +399,7 @@ async function openEdit(row: InboundReturnListItem) {
         kind: row.kind ?? "return",
         productId: row.productId ?? "",
         materialName: row.materialName ?? "",
+        productGroupId: row.productGroupId ?? "",
         weightJin: row.weightJin ?? 0,
         unitWeightG: row.unitWeightG ?? 0,
         qtyDeclared: row.qtyDeclared ?? row.qty,
@@ -381,13 +411,14 @@ async function openEdit(row: InboundReturnListItem) {
   dialogVisible.value = true;
 }
 
-// 换玩具厂时，原来选的货号可能不属于新厂，清掉并重新拉一遍这个厂的产品
-// （产品清单还是要拉——物料名称下拉的候选来自这个厂各产品的物料清单）
+// 换玩具厂时，原来选的货号/产品可能不属于新厂，清掉并重新拉一遍这个厂的产品和产品清单
 async function onFactoryChange() {
   await Promise.all([loadProducts(form.factoryId), loadProductGroups(form.factoryId)]);
   const productIds = new Set(productsByFactory.value.map((p) => p.id));
+  const groupIds = new Set(productGroups.value.map((g) => g.id));
   for (const row of form.rows) {
     if (row.productId && !productIds.has(row.productId)) row.productId = "";
+    if (row.productGroupId && !groupIds.has(row.productGroupId)) row.productGroupId = "";
   }
 }
 
@@ -510,7 +541,7 @@ function buildRowFields(row: RowItem) {
     sku: "",
     name: "",
     materialName: row.materialName.trim(),
-    productGroupId: null,
+    productGroupId: row.productGroupId || null,
     weightJin: row.weightJin,
     unitWeightG: 0,
     qtyDeclared: null,
@@ -526,6 +557,9 @@ async function handleSubmit() {
     ElMessage.warning("请至少填好一行：退货要选货号+填重量(斤)，发料要填物料名称+填重量(斤)");
     return;
   }
+  // 发料行填的物料名称，选了产品但物料清单里还没有的话，顺手记进这个产品的物料清单
+  await Promise.all(valid.map(ensureMaterialInGroup));
+
   if (dialogMode.value === "create") {
     for (const row of valid) {
       const dto: CreateInboundReturnDto = {
@@ -722,6 +756,7 @@ onMounted(async () => {
             <div class="rows-grid rows-grid--header">
               <span class="col-label">操作</span>
               <span class="col-label">类型</span>
+              <span class="col-label">产品</span>
               <span class="col-label">货号 / 物料</span>
               <span class="col-label col-label--required">重量(斤)</span>
               <span class="col-label">克重(g)</span>
@@ -729,8 +764,9 @@ onMounted(async () => {
               <span class="col-label">算出数量</span>
               <span class="col-label">备注</span>
             </div>
-            <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，直接打物料名称，
-                 下拉候选是这个玩具厂各产品的物料清单（在"产品管理"里维护），选不到就直接打字 -->
+            <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
+                 产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
+                 保存时顺手记进这个产品的物料清单，下次就有了 -->
             <div
               v-for="(row, idx) in form.rows"
               :key="idx"
@@ -746,6 +782,21 @@ onMounted(async () => {
                 <el-option label="发料" value="issue" />
                 <el-option label="退货" value="return" />
               </el-select>
+
+              <el-select
+                v-if="row.kind === 'issue'"
+                v-model="row.productGroupId"
+                filterable
+                clearable
+                :disabled="!form.factoryId"
+                placeholder="产品（选填）"
+                style="width: 100%"
+                popper-class="tag-cloud-dropdown"
+                @change="onRowProductGroupChange(row)"
+              >
+                <el-option v-for="g in productGroups" :key="g.id" :label="g.name" :value="g.id" />
+              </el-select>
+              <span v-else class="muted col-dash">-</span>
 
               <el-select
                 v-if="row.kind === 'return'"
@@ -767,7 +818,7 @@ onMounted(async () => {
                 style="width: 100%"
                 popper-class="tag-cloud-dropdown"
               >
-                <el-option v-for="name in materialOptionsFor()" :key="name" :label="name" :value="name" />
+                <el-option v-for="name in materialOptionsFor(row)" :key="name" :label="name" :value="name" />
               </el-select>
 
               <el-input-number v-model="row.weightJin" :min="0" :precision="3" controls-position="right" style="width: 100%" />
@@ -938,13 +989,13 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  /* 操作 / 类型 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 备注——
+  /* 操作 / 类型 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 备注——
      不管发料还是退货都是这一套列，用不上的格子显示"-"，不会因为切换类型列忽多忽少 */
-  grid-template-columns: 60px 90px 200px 95px 95px 95px 80px 140px;
+  grid-template-columns: 60px 90px 130px 180px 95px 95px 95px 80px 120px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  min-width: 920px;
+  min-width: 1000px;
 }
 
 /* 选了"退货"的那一行，类型下拉框变红，一眼看出哪几行会从应收里扣钱 */
