@@ -744,7 +744,7 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label-width="0">
           <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会乱换行错位。
-               表头不管发料还是退货都一样（类型/产品/货号·物料/重量/克重/数量/算出数量/操作），
+               表头不管发料还是退货都一样（类型/产品/货号·物料/重量/克重/数量/操作），
                哪个字段这一行用不上就显示"-"，不会因为切换类型而整张表的列忽多忽少 -->
           <el-alert v-if="duplicateGroups.length" type="warning" show-icon :closable="false" class="dup-alert">
             <template #title>这批里有 {{ duplicateGroups.length }} 组疑似重复，对应的行已经标红</template>
@@ -760,7 +760,6 @@ onMounted(async () => {
               <span class="col-label col-label--required">重量(斤)</span>
               <span class="col-label">克重(g)</span>
               <span class="col-label">数量</span>
-              <span class="col-label">算出数量</span>
               <span class="col-label">操作</span>
             </div>
             <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
@@ -829,24 +828,14 @@ onMounted(async () => {
               />
               <span v-else class="muted col-dash">-</span>
 
-              <el-input-number
-                v-if="row.kind === 'return'"
-                v-model="row.qtyDeclared"
-                :min="0"
-                controls-position="right"
-                style="width: 100%"
-              />
-              <span v-else class="muted col-dash">-</span>
-
-              <!-- 重量(斤) ÷ 单个克重(g) 换算出来的数量，只有退货用得到——发料只按重量记，
-                   没有件数这回事 -->
-              <span
-                v-if="row.kind === 'return'"
-                class="calc-qty"
-                :class="{ 'calc-qty--diff': hasDiff(row), 'calc-qty--big-diff': hasBigDiff(row) }"
-              >
-                {{ qtyCalculated(row) }}
-              </span>
+              <!-- 数量跟"算出数量"（重量÷克重换算出来的）不一致，不单独占一列，在这个输入框
+                   旁边放个提醒图标就够了——鼠标停上去能看到算出来的数量是多少 -->
+              <div v-if="row.kind === 'return'" class="qty-cell">
+                <el-input-number v-model="row.qtyDeclared" :min="0" :controls="false" style="width: 100%" />
+                <el-tooltip v-if="hasDiff(row)" :content="`跟按重量算出来的数量（${qtyCalculated(row)}）不一致`">
+                  <el-icon class="diff-icon" :class="{ 'diff-icon--big': hasBigDiff(row) }"><WarningFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <span v-else class="muted col-dash">-</span>
 
               <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
@@ -986,13 +975,13 @@ onMounted(async () => {
 }
 .rows-grid {
   display: grid;
-  /* 类型 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 算出数量 / 操作——
-     不管发料还是退货都是这一套列，用不上的格子显示"-"，不会因为切换类型列忽多忽少 */
-  grid-template-columns: 90px 130px 180px 95px 95px 95px 80px 60px;
+  /* 类型 / 产品 / 货号或物料 / 重量 / 克重 / 数量 / 操作——数量跟按重量算出来的数量
+     不一致时，在数量这格里提醒（见 .qty-cell），不单独占一列 */
+  grid-template-columns: 90px 130px 180px 95px 95px 110px 60px;
   gap: 8px;
   align-items: center;
   margin-bottom: 8px;
-  min-width: 880px;
+  min-width: 800px;
 }
 
 /* 选了"退货"的那一行，类型下拉框变红，一眼看出哪几行会从应收里扣钱 */
@@ -1029,19 +1018,10 @@ onMounted(async () => {
   border-radius: 4px;
 }
 
-.calc-qty {
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  color: #909399;
-}
-
-.calc-qty--diff {
-  color: #e6a23c;
-}
-
-.calc-qty--big-diff {
-  color: #f56c6c;
-  font-weight: 700;
+.qty-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .col-label {
