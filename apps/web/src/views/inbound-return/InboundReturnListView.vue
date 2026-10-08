@@ -171,6 +171,9 @@ type RowItem = {
   qtyDeclared: number | null;
   reason: string;
   ocrName: string;
+  /** 这一行是从 form.imageUrls 里第几张图识别出来的；手动加的行（没有对应图片）是 null。
+   * 只用来在界面上把"这张图识别出来的行"跟这张图摆在一起显示，提交时也决定这一行该挂哪张图 */
+  sourceImageIdx: number | null;
 };
 
 // 新增一行默认"发料"：出库单里大部分是发料、偶尔夹几行退货，退货的那几行手动改一下
@@ -185,6 +188,7 @@ function blankRow(kind: OutboundKind = "issue"): RowItem {
     qtyDeclared: null,
     reason: "",
     ocrName: "",
+    sourceImageIdx: null,
   };
 }
 
@@ -224,6 +228,31 @@ const duplicateGroups = computed<DuplicateGroup[]>(() => {
   return [...groups.values()].filter((g) => g.indexes.length > 1);
 });
 const duplicateRowIndexes = computed(() => new Set(duplicateGroups.value.flatMap((g) => g.indexes)));
+
+/**
+ * 识别结果不能混在一起摊成一张大表——按"这一行是哪张图识别出来的"重新分组，每组自己的图片
+ * 摆在自己那组行的上面，一组一组看，不用在一堆行里猜哪几行是哪张图来的。手动加的行（没有
+ * 图）归到最后"手动新增"这一组，没有手动行的时候这一组不出现。
+ */
+interface RenderRow {
+  row: RowItem;
+  /** 在 form.rows 里的下标，删除/标红都按这个来，跟渲染顺序（按组）分开算 */
+  flatIndex: number;
+}
+interface RenderGroup {
+  imageIdx: number | null;
+  imageUrl: string | null;
+  rows: RenderRow[];
+}
+const renderGroups = computed<RenderGroup[]>(() => {
+  const groups: RenderGroup[] = form.imageUrls.map((url, i) => ({ imageIdx: i, imageUrl: url, rows: [] }));
+  const manual: RenderGroup = { imageIdx: null, imageUrl: null, rows: [] };
+  form.rows.forEach((row, flatIndex) => {
+    const g = row.sourceImageIdx != null ? groups[row.sourceImageIdx] : undefined;
+    (g ?? manual).rows.push({ row, flatIndex });
+  });
+  return manual.rows.length ? [...groups, manual] : groups;
+});
 
 // 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
 function onRowProductGroupChange(row: RowItem) {
@@ -371,9 +400,11 @@ function resetForm() {
   });
   lastIssueProductGroupId.value = "";
 }
-function addRow() {
+// sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
+// 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
+function addRow(sourceImageIdx: number | null = null) {
   // 新增的行直接带上这批最近选的产品，省得同一个产品每行都要重选一遍
-  form.rows.push({ ...blankRow(), productGroupId: lastIssueProductGroupId.value });
+  form.rows.push({ ...blankRow(), productGroupId: lastIssueProductGroupId.value, sourceImageIdx });
 }
 function removeRow(i: number) {
   form.rows.splice(i, 1);
@@ -409,6 +440,8 @@ async function openEdit(row: InboundReturnListItem) {
         qtyDeclared: row.qtyDeclared ?? row.qty,
         reason: row.reason ?? "",
         ocrName: "",
+        // 编辑时只有一行，有图就归到第一张图那组，方便对着图核对，没图就是手动那组
+        sourceImageIdx: row.images?.length ? 0 : null,
       },
     ],
   });
@@ -473,9 +506,10 @@ async function onReturnOcrUpload(options: UploadRequestOptions) {
             unitWeightG: it.unitWeightG,
             qtyDeclared: it.qtyDeclared,
             ocrName: `${it.sku} ${it.name}`.trim(),
+            sourceImageIdx: 0,
           };
         })
-      : [blankRow("return")];
+      : [{ ...blankRow("return"), sourceImageIdx: 0 }];
 
     dialogVisible.value = true;
     ElMessage.success("识别完成，请核对后保存");
@@ -514,7 +548,7 @@ async function importIssueFiles(files: File[]) {
     const imageUrls: string[] = [];
     const rows: RowItem[] = [];
     let headerFilled = false;
-    for (const file of files) {
+    for (const [idx, file] of files.entries()) {
       const r = await recognizeOutboundIssue(file);
       imageUrls.push(r.imageUrl);
       if (!headerFilled) {
@@ -531,11 +565,15 @@ async function importIssueFiles(files: File[]) {
         if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
         headerFilled = true;
       }
-      for (const it of r.items) rows.push({ ...blankRow("issue"), materialName: it.materialName, weightJin: it.weightJin });
+      // 打上这一行是第几张图识别出来的，界面上才能把这张图跟它识别出来的行摆在一起，
+      // 不是所有图识别出来的行混成一张大表
+      for (const it of r.items) {
+        rows.push({ ...blankRow("issue"), materialName: it.materialName, weightJin: it.weightJin, sourceImageIdx: idx });
+      }
     }
 
     form.imageUrls = imageUrls;
-    form.rows = rows.length ? rows : [blankRow("issue")];
+    form.rows = rows.length ? rows : [{ ...blankRow("issue"), sourceImageIdx: 0 }];
 
     dialogVisible.value = true;
     ElMessage.success(
@@ -594,6 +632,9 @@ async function handleSubmit() {
 
   if (dialogMode.value === "create") {
     for (const row of valid) {
+      // 这一行是哪张图识别出来的，就只带那一张图，不是这批导入的图全塞给每一行——
+      // 不然两张图导入出 10 行，每一行都背着这两张图，核对的时候根本分不清是哪张
+      const images = row.sourceImageIdx != null ? [form.imageUrls[row.sourceImageIdx]].filter(Boolean) : [];
       const dto: CreateInboundReturnDto = {
         kind: row.kind,
         factoryId: form.factoryId,
@@ -601,7 +642,7 @@ async function handleSubmit() {
         returnDate: form.returnDate,
         reason: row.reason,
         remark: form.remark,
-        images: form.imageUrls,
+        images,
       };
       await submitWithDuplicateConfirm(dto, createInboundReturn);
     }
@@ -777,133 +818,138 @@ onMounted(async () => {
           <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
         <el-form-item label-width="0">
-          <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会乱换行错位。
-               表头不管发料还是退货都一样（类型/产品/货号·物料/重量/克重/数量/操作），
-               哪个字段这一行用不上就显示"-"，不会因为切换类型而整张表的列忽多忽少 -->
+          <!-- 识别结果不能混在一起摊成一张大表：按"这一行是哪张图识别出来的"分组，一组一组摆，
+               每组自己的图片放在自己那组明细的上面，对着这一张图核对这几行，不用在一堆行里
+               翻来翻去猜是哪张图来的。表头不管发料还是退货都一样（类型/产品/货号·物料/重量/
+               克重/数量/操作），哪个字段这一行用不上就显示"-" -->
           <el-alert v-if="duplicateGroups.length" type="warning" show-icon :closable="false" class="dup-alert">
             <template #title>这批里有 {{ duplicateGroups.length }} 组疑似重复，对应的行已经标红</template>
             <div v-for="g in duplicateGroups" :key="g.key" class="dup-item">
               {{ g.label }} — 第 {{ g.indexes.map((i) => i + 1).join("、") }} 行
             </div>
           </el-alert>
-          <div class="rows-editor">
-            <div class="rows-grid rows-grid--header">
-              <span class="col-label">类型</span>
-              <span class="col-label">产品</span>
-              <span class="col-label">货号 / 物料</span>
-              <span class="col-label col-label--required">重量(斤)</span>
-              <span class="col-label">克重(g)</span>
-              <span class="col-label">数量</span>
-              <span class="col-label">操作</span>
+
+          <div v-for="g in renderGroups" :key="g.imageIdx ?? 'manual'" class="image-rows-group">
+            <div v-if="g.imageUrl" class="image-panel-item">
+              <div
+                class="slip-frame"
+                :class="{
+                  'slip-frame--zoomed': slipZoomStateFor(g.imageIdx!).zoomLevel.value > 1,
+                  'slip-frame--dragging': slipZoomStateFor(g.imageIdx!).isDragging.value,
+                }"
+                @click="slipZoomStateFor(g.imageIdx!).onClick"
+                @wheel.prevent="slipZoomStateFor(g.imageIdx!).onWheel"
+                @mousedown="slipZoomStateFor(g.imageIdx!).onMouseDown"
+              >
+                <img :src="g.imageUrl" class="slip-preview-img" :style="slipZoomStateFor(g.imageIdx!).style.value" draggable="false" />
+              </div>
+              <div class="slip-hint">
+                {{ form.imageUrls.length > 1 ? `第 ${g.imageIdx! + 1} 张 · ` : "" }}滚轮缩放、拖拽平移，对着原图核对下面这几行
+              </div>
             </div>
+            <div v-else-if="renderGroups.length > 1" class="manual-group-label">手动新增（没有对应图片）</div>
+
             <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
                  产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
                  保存时顺手记进这个产品的物料清单，下次就有了 -->
-            <div
-              v-for="(row, idx) in form.rows"
-              :key="idx"
-              class="rows-grid"
-              :class="{ 'rows-grid--duplicate': duplicateRowIndexes.has(idx) }"
-            >
-              <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对——放在
-                   最前面，一打开就能先定好类型，再填后面跟着这个类型变化的字段 -->
-              <el-select v-model="row.kind" style="width: 100%" :class="{ 'kind-select--return': row.kind === 'return' }">
-                <el-option label="发料" value="issue" />
-                <el-option label="退货" value="return" />
-              </el-select>
-
-              <el-select
-                v-if="row.kind === 'issue'"
-                v-model="row.productGroupId"
-                filterable
-                clearable
-                :disabled="!form.factoryId"
-                placeholder="产品（选填）"
-                style="width: 100%"
-                popper-class="tag-cloud-dropdown"
-                @change="onRowProductGroupChange(row)"
-              >
-                <el-option v-for="g in productGroups" :key="g.id" :label="g.name" :value="g.id" />
-              </el-select>
-              <span v-else class="muted col-dash">-</span>
-
-              <el-select
-                v-if="row.kind === 'return'"
-                v-model="row.productId"
-                filterable
-                :disabled="!form.factoryId"
-                :placeholder="row.ocrName ? `识别为：${row.ocrName}` : '选择货号'"
-                style="width: 100%"
-              >
-                <el-option v-for="p in productsByFactory" :key="p.id" :label="`${p.sku} · ${p.name}`" :value="p.id" />
-              </el-select>
-              <el-select
-                v-else
-                v-model="row.materialName"
-                filterable
-                allow-create
-                default-first-option
-                placeholder="物料名称"
-                style="width: 100%"
-                popper-class="tag-cloud-dropdown"
-              >
-                <el-option v-for="name in materialOptionsFor(row)" :key="name" :label="name" :value="name" />
-              </el-select>
-
-              <el-input-number v-model="row.weightJin" :min="0" :precision="3" :controls="false" style="width: 100%" />
-
-              <el-input-number
-                v-if="row.kind === 'return'"
-                v-model="row.unitWeightG"
-                :min="0"
-                :precision="3"
-                controls-position="right"
-                style="width: 100%"
-              />
-              <span v-else class="muted col-dash">-</span>
-
-              <!-- 数量跟"算出数量"（重量÷克重换算出来的）不一致，不单独占一列，在这个输入框
-                   旁边放个提醒图标就够了——鼠标停上去能看到算出来的数量是多少 -->
-              <div v-if="row.kind === 'return'" class="qty-cell">
-                <el-input-number v-model="row.qtyDeclared" :min="0" :controls="false" style="width: 100%" />
-                <el-tooltip v-if="hasDiff(row)" :content="`跟按重量算出来的数量（${qtyCalculated(row)}）不一致`">
-                  <el-icon class="diff-icon" :class="{ 'diff-icon--big': hasBigDiff(row) }"><WarningFilled /></el-icon>
-                </el-tooltip>
+            <div class="rows-editor">
+              <div class="rows-grid rows-grid--header">
+                <span class="col-label">类型</span>
+                <span class="col-label">产品</span>
+                <span class="col-label">货号 / 物料</span>
+                <span class="col-label col-label--required">重量(斤)</span>
+                <span class="col-label">克重(g)</span>
+                <span class="col-label">数量</span>
+                <span class="col-label">操作</span>
               </div>
-              <span v-else class="muted col-dash">-</span>
+              <div
+                v-for="r in g.rows"
+                :key="r.flatIndex"
+                class="rows-grid"
+                :class="{ 'rows-grid--duplicate': duplicateRowIndexes.has(r.flatIndex) }"
+              >
+                <!-- 这一行是发料还是退货：退货才会从应收账单里扣，所以每行都要看清楚选对——放在
+                     最前面，一打开就能先定好类型，再填后面跟着这个类型变化的字段 -->
+                <el-select
+                  v-model="r.row.kind"
+                  style="width: 100%"
+                  :class="{ 'kind-select--return': r.row.kind === 'return' }"
+                >
+                  <el-option label="发料" value="issue" />
+                  <el-option label="退货" value="return" />
+                </el-select>
 
-              <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(idx)">删除</el-button>
-              <span v-else class="muted col-dash">-</span>
+                <el-select
+                  v-if="r.row.kind === 'issue'"
+                  v-model="r.row.productGroupId"
+                  filterable
+                  clearable
+                  :disabled="!form.factoryId"
+                  placeholder="产品（选填）"
+                  style="width: 100%"
+                  popper-class="tag-cloud-dropdown"
+                  @change="onRowProductGroupChange(r.row)"
+                >
+                  <el-option v-for="pg in productGroups" :key="pg.id" :label="pg.name" :value="pg.id" />
+                </el-select>
+                <span v-else class="muted col-dash">-</span>
+
+                <el-select
+                  v-if="r.row.kind === 'return'"
+                  v-model="r.row.productId"
+                  filterable
+                  :disabled="!form.factoryId"
+                  :placeholder="r.row.ocrName ? `识别为：${r.row.ocrName}` : '选择货号'"
+                  style="width: 100%"
+                >
+                  <el-option v-for="p in productsByFactory" :key="p.id" :label="`${p.sku} · ${p.name}`" :value="p.id" />
+                </el-select>
+                <el-select
+                  v-else
+                  v-model="r.row.materialName"
+                  filterable
+                  allow-create
+                  default-first-option
+                  placeholder="物料名称"
+                  style="width: 100%"
+                  popper-class="tag-cloud-dropdown"
+                >
+                  <el-option v-for="name in materialOptionsFor(r.row)" :key="name" :label="name" :value="name" />
+                </el-select>
+
+                <el-input-number v-model="r.row.weightJin" :min="0" :precision="3" :controls="false" style="width: 100%" />
+
+                <el-input-number
+                  v-if="r.row.kind === 'return'"
+                  v-model="r.row.unitWeightG"
+                  :min="0"
+                  :precision="3"
+                  controls-position="right"
+                  style="width: 100%"
+                />
+                <span v-else class="muted col-dash">-</span>
+
+                <!-- 数量跟"算出数量"（重量÷克重换算出来的）不一致，不单独占一列，在这个输入框
+                     旁边放个提醒图标就够了——鼠标停上去能看到算出来的数量是多少 -->
+                <div v-if="r.row.kind === 'return'" class="qty-cell">
+                  <el-input-number v-model="r.row.qtyDeclared" :min="0" :controls="false" style="width: 100%" />
+                  <el-tooltip v-if="hasDiff(r.row)" :content="`跟按重量算出来的数量（${qtyCalculated(r.row)}）不一致`">
+                    <el-icon class="diff-icon" :class="{ 'diff-icon--big': hasBigDiff(r.row) }"><WarningFilled /></el-icon>
+                  </el-tooltip>
+                </div>
+                <span v-else class="muted col-dash">-</span>
+
+                <el-button v-if="dialogMode === 'create'" link type="danger" @click="removeRow(r.flatIndex)">删除</el-button>
+                <span v-else class="muted col-dash">-</span>
+              </div>
+              <el-button v-if="dialogMode === 'create'" @click="addRow(g.imageIdx)">+ 添加一行</el-button>
             </div>
-            <el-button v-if="dialogMode === 'create'" @click="addRow">+ 添加一行</el-button>
           </div>
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" :rows="2" />
         </el-form-item>
       </el-form>
-
-      <!-- 单据原图放在明细下面，居中摆一个固定框——跟入库确认页的图片位置统一。
-           发料单可能一次导入了好几张图（同一张单拍了好几页），每张图各自独立缩放/平移 -->
-      <div v-if="form.imageUrls.length" class="image-panel">
-        <div v-for="(url, idx) in form.imageUrls" :key="url" class="image-panel-item">
-          <div
-            class="slip-frame"
-            :class="{
-              'slip-frame--zoomed': slipZoomStateFor(idx).zoomLevel.value > 1,
-              'slip-frame--dragging': slipZoomStateFor(idx).isDragging.value,
-            }"
-            @click="slipZoomStateFor(idx).onClick"
-            @wheel.prevent="slipZoomStateFor(idx).onWheel"
-            @mousedown="slipZoomStateFor(idx).onMouseDown"
-          >
-            <img :src="url" class="slip-preview-img" :style="slipZoomStateFor(idx).style.value" draggable="false" />
-          </div>
-          <div class="slip-hint">
-            {{ form.imageUrls.length > 1 ? `第 ${idx + 1} 张 · ` : "" }}滚轮缩放、拖拽平移，对着原图核对识别结果
-          </div>
-        </div>
-      </div>
 
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -940,20 +986,31 @@ onMounted(async () => {
   cursor: zoom-in;
   vertical-align: middle;
 }
-/* 单据原图放在货号明细下面，居中摆一个固定尺寸的框——跟入库确认页的图片位置、
-   尺寸统一，不用对着不同页面找不同地方看图 */
-.image-panel {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  margin-top: 16px;
+/* 一组 = 一张图 + 这张图识别出来的那几行，图摆在自己这组明细的上面，组与组之间拉开
+   间距、加条分隔线，一眼就能看出这几行是跟着哪张图来的，不会跟别的图的行混在一起 */
+.image-rows-group {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px dashed #e4e7ed;
+}
+
+.image-rows-group:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .image-panel-item {
   display: flex;
   flex-direction: column;
   align-items: center;
+  margin-bottom: 12px;
+}
+
+.manual-group-label {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 8px;
 }
 
 .slip-hint {
