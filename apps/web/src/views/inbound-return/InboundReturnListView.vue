@@ -254,6 +254,71 @@ const renderGroups = computed<RenderGroup[]>(() => {
   return manual.rows.length ? [...groups, manual] : groups;
 });
 
+/**
+ * 导了好几张图的时候，一组一组提交——跟单张录入一样点一下就存，存完自动把下一组还没提交的
+ * 补上来显示，不用自己往下滚去找。只有一张图（或手动录入、编辑）还是走原来"一次性全部保存"
+ * 那条路，不用为了这个场景多绕一圈。
+ */
+// 已经提交完的组，行会从 form.rows 里摘掉，renderGroups 里这一组自然就空了——只给还有
+// 行的组编号，摘空的组从列表里消失，后一组自动顶上来占原来的位置，不用手动"前进"
+const pendingGroups = computed(() => renderGroups.value.filter((g) => g.rows.length > 0));
+// 导入时一次选了好几张图才打开，整个弹窗期间都按"一组一组提交"走，不随着提交到只剩最后
+// 一组就自动变回"保存"按钮——不然按钮文字在最后一组突然跳一下，让人以为哪里出错了。
+// 只在真正导入多张图的时候才打开（importIssueFiles 里设），resetForm 时关掉
+const isMultiImageBatch = ref(false);
+const currentGroupIdx = ref(0);
+watch(pendingGroups, (groups) => {
+  if (currentGroupIdx.value >= groups.length) currentGroupIdx.value = Math.max(0, groups.length - 1);
+});
+const currentGroup = computed(() => pendingGroups.value[currentGroupIdx.value]);
+// 不是多图批次的时候，货号明细照常显示 renderGroups 里的全部组（通常也就一组）；
+// 是多图批次的时候，一次只显示当前这一组，不用滚动去找
+const groupsToShow = computed(() => (isMultiImageBatch.value ? (currentGroup.value ? [currentGroup.value] : []) : renderGroups.value));
+
+/** 提交一组（一张图 + 它识别出来的那几行），成功就把这几行从 form.rows 里摘掉；
+ * 不在这里弹提示/关弹窗，调用方根据摘完之后还剩不剩组来决定怎么收尾 */
+async function submitGroupRows(group: RenderGroup): Promise<boolean> {
+  const valid = group.rows.map((r) => r.row).filter(rowIsValid);
+  if (!valid.length) {
+    ElMessage.warning("请至少填好一行：退货要选货号+填重量(斤)，发料要填物料名称+填重量(斤)");
+    return false;
+  }
+  await Promise.all(valid.map(ensureMaterialInGroup));
+  for (const row of valid) {
+    // 这一行只带它自己来源的那张图，不是这批导入的图全部塞给每一行
+    const images = row.sourceImageIdx != null ? [form.imageUrls[row.sourceImageIdx]].filter(Boolean) : [];
+    const dto: CreateInboundReturnDto = {
+      kind: row.kind,
+      factoryId: form.factoryId,
+      ...buildRowFields(row),
+      returnDate: form.returnDate,
+      reason: row.reason,
+      remark: form.remark,
+      images,
+    };
+    await submitWithDuplicateConfirm(dto, createInboundReturn);
+  }
+  const flatIndexes = new Set(group.rows.map((r) => r.flatIndex));
+  form.rows = form.rows.filter((_, idx) => !flatIndexes.has(idx));
+  return true;
+}
+
+async function submitCurrentGroup() {
+  await formRef.value?.validate();
+  const group = currentGroup.value;
+  if (!group) return;
+  const ok = await submitGroupRows(group);
+  if (!ok) return;
+  load();
+  if (pendingGroups.value.length === 0) {
+    ElMessage.success("这批出库单全部提交完成");
+    clearDraft();
+    dialogVisible.value = false;
+  } else {
+    ElMessage.success(`已保存，自动切到下一组（还剩 ${pendingGroups.value.length} 组）`);
+  }
+}
+
 // 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
 function onRowProductGroupChange(row: RowItem) {
   row.materialName = "";
@@ -381,10 +446,14 @@ async function discardDraft() {
 }
 
 watch(form, saveDraft, { deep: true });
-// 图片换了（新建/识别/编辑/恢复草稿）就把缩放平移状态清掉，不然带着上一张图的缩放状态显示新图
+// 图片换了（新建/识别/编辑/恢复草稿）就把缩放平移状态清掉，不然带着上一张图的缩放状态显示新图；
+// 新导入一批图，也把"当前第几组"归零，不要停在上一批导入时的进度上
 watch(
   () => form.imageUrls,
-  () => resetSlipZoomStates(),
+  () => {
+    resetSlipZoomStates();
+    currentGroupIdx.value = 0;
+  },
 );
 watch(dialogVisible, (open) => {
   if (!open) checkDraft();
@@ -399,6 +468,8 @@ function resetForm() {
     rows: [],
   });
   lastIssueProductGroupId.value = "";
+  isMultiImageBatch.value = false;
+  currentGroupIdx.value = 0;
 }
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
@@ -423,6 +494,10 @@ function openCreate() {
 async function openEdit(row: InboundReturnListItem) {
   dialogMode.value = "edit";
   editingId.value = row.id;
+  // 编辑永远走"一次性保存"（调用 updateInboundReturn，不是新建）那条路，不能停在上一次
+  // 多图导入留下的"一组一组提交"状态上——那条路是硬编码调 createInboundReturn 建新记录的
+  isMultiImageBatch.value = false;
+  currentGroupIdx.value = 0;
   await Promise.all([loadProducts(row.factoryId), loadProductGroups(row.factoryId)]);
   Object.assign(form, {
     factoryId: row.factoryId,
@@ -574,10 +649,14 @@ async function importIssueFiles(files: File[]) {
 
     form.imageUrls = imageUrls;
     form.rows = rows.length ? rows : [{ ...blankRow("issue"), sourceImageIdx: 0 }];
+    // 选了不止一张图才按"一组一组提交"来；就选了一张图，跟原来一样一次性保存就行
+    isMultiImageBatch.value = files.length > 1;
 
     dialogVisible.value = true;
     ElMessage.success(
-      files.length > 1 ? `${files.length} 张图识别完成，共 ${rows.length} 行，请核对后保存` : "识别完成，请核对后保存",
+      files.length > 1
+        ? `${files.length} 张图识别完成，共 ${rows.length} 行，可以逐组提交，不用一次填完`
+        : "识别完成，请核对后保存",
     );
   } finally {
     uploading.value = false;
@@ -829,7 +908,10 @@ onMounted(async () => {
             </div>
           </el-alert>
 
-          <div v-for="g in renderGroups" :key="g.imageIdx ?? 'manual'" class="image-rows-group">
+          <!-- 导了好几张图的时候一组一组来，一次只显示当前这一组（groupsToShow 只有它一个），
+               提交这一组之后自动换下一组，不用滚动去找；只有一组（手动录入/单张图/编辑）就
+               照常全部显示，走原来"一次性保存"那个按钮 -->
+          <div v-for="g in groupsToShow" :key="g.imageIdx ?? 'manual'" class="image-rows-group">
             <div v-if="g.imageUrl" class="image-panel-item">
               <div
                 class="slip-frame"
@@ -952,8 +1034,12 @@ onMounted(async () => {
       </el-form>
 
       <template #footer>
+        <span v-if="isMultiImageBatch" class="progress-hint">
+          第 {{ currentGroupIdx + 1 }} / {{ pendingGroups.length }} 组
+        </span>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit">保存</el-button>
+        <el-button v-if="isMultiImageBatch" type="primary" @click="submitCurrentGroup">提交这一组</el-button>
+        <el-button v-else type="primary" @click="handleSubmit">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -976,6 +1062,11 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 .filter-sep {
+  color: #909399;
+  font-size: 13px;
+}
+.progress-hint {
+  margin-right: auto;
   color: #909399;
   font-size: 13px;
 }
