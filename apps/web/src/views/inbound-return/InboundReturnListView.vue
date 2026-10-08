@@ -742,7 +742,7 @@ onMounted(async () => {
         <el-form-item label="出库日期" prop="returnDate">
           <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="货号明细">
+        <el-form-item label-width="0">
           <!-- 每一行固定用 grid 分栏，跟表头严格对齐，宽度不够就整体横向滚动，不会乱换行错位。
                表头不管发料还是退货都一样（产品/类型/重量/克重/数量/备注），哪个字段这一行用
                不上就显示"-"，不会因为切换类型而整张表的列忽多忽少 -->
