@@ -213,6 +213,17 @@ interface DuplicateGroup {
   label: string;
   /** 命中这一组重复的行号（从 0 开始），用来标红对应的行 */
   indexes: number[];
+  /** 每个命中行"第几张图第几行/手动新增第几行"的定位文案，跟 indexes 一一对应——"校对
+   * 工作台"一次只显示一张图，光甩一个全局行号（第 4 行）根本不知道第 4 行在哪张图里，
+   * 这里换算成跟界面实际分组、顺序对得上的说法，一眼能找到 */
+  locations: string[];
+}
+// 把 form.rows 的下标换算成"第几张图第几行"（手动新增的行换算成"手动新增第几行"）
+function rowLocationLabel(idx: number): string {
+  const row = form.rows[idx];
+  const sameSource = form.rows.filter((r) => r.sourceImageIdx === row.sourceImageIdx);
+  const pos = sameSource.indexOf(row) + 1;
+  return row.sourceImageIdx != null ? `第${row.sourceImageIdx + 1}张图第${pos}行` : `手动新增第${pos}行`;
 }
 const duplicateGroups = computed<DuplicateGroup[]>(() => {
   const groups = new Map<string, DuplicateGroup>();
@@ -231,8 +242,9 @@ const duplicateGroups = computed<DuplicateGroup[]>(() => {
       key = `return:${row.productId}:${qty}`;
       label = `退货 · 货号「${product?.sku ?? "未知"}」· 数量 ${qty}`;
     }
-    const g = groups.get(key) ?? { key, label, indexes: [] };
+    const g = groups.get(key) ?? { key, label, indexes: [], locations: [] };
     g.indexes.push(idx);
+    g.locations.push(rowLocationLabel(idx));
     groups.set(key, g);
   });
   return [...groups.values()].filter((g) => g.indexes.length > 1);
@@ -937,9 +949,7 @@ onMounted(async () => {
                克重/数量/操作），哪个字段这一行用不上就显示"-" -->
           <el-alert v-if="duplicateGroups.length" type="warning" show-icon :closable="false" class="dup-alert">
             <template #title>这批里有 {{ duplicateGroups.length }} 组疑似重复，对应的行已经标红</template>
-            <div v-for="g in duplicateGroups" :key="g.key" class="dup-item">
-              {{ g.label }} — 第 {{ g.indexes.map((i) => i + 1).join("、") }} 行
-            </div>
+            <div v-for="g in duplicateGroups" :key="g.key" class="dup-item">{{ g.label }} — {{ g.locations.join("、") }}</div>
           </el-alert>
 
           <!-- 导了好几张图的时候先给一张"校对工作台"总览：每张图一行，标好校对状态，点
