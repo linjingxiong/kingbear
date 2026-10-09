@@ -279,13 +279,12 @@ const completedGroupKeys = ref<Set<string>>(new Set());
 function groupKey(g: RenderGroup): string {
   return g.imageIdx != null ? String(g.imageIdx) : "manual";
 }
-// 总览列表：每张图各一行；"手动新增"固定摆最后一行，哪怕暂时没有手动行也留着这个入口，
-// 图都校对完了想再手动补一行，不用现找地方加
+// 总览列表：每张图各一行；"手动新增"这一行只有真的已经有手动行了才出现，不会凭空摆一个
+// 空的"手动"条目在那——之前固定摆一条空的，容易让人误点进去、又手滑点一下"+ 添加一行"，
+// 多出一条自己都不知道是什么的空行
 const listGroups = computed<RenderGroup[]>(() => {
   if (!isMultiImageBatch.value) return [];
-  const imageGroups = renderGroups.value.filter((g) => g.imageIdx != null);
-  const manual = renderGroups.value.find((g) => g.imageIdx == null) ?? { imageIdx: null, imageUrl: null, rows: [] };
-  return [...imageGroups, manual];
+  return renderGroups.value;
 });
 const completedCount = computed(() => listGroups.value.filter((g) => completedGroupKeys.value.has(groupKey(g))).length);
 const activeGroup = computed<RenderGroup | undefined>(() =>
@@ -300,6 +299,12 @@ function openGroupDetail(key: string) {
 }
 function backToList() {
   activeGroupKey.value = null;
+}
+// 总览列表默认不显示"手动"条目，真要手动补一行（比如这几张图漏拍了一行）就点这个，
+// 加一行空的、直接带你进去填，不用先去找哪里能加
+function addManualRowAndOpen() {
+  addRow(null);
+  activeGroupKey.value = "manual";
 }
 
 /** 保存一组（一张图 + 它识别出来的那几行）。组里只要有没填完整的行，这些行就不提交、也不
@@ -327,9 +332,12 @@ async function submitGroupRows(group: RenderGroup): Promise<boolean> {
         images,
       };
       await submitWithDuplicateConfirm(dto, createInboundReturn);
+      // 这一行一提交成功就立刻从表单里摘掉，不等整组都提交完再一起摘——不然万一组里
+      // 后面某一行提交时弹出"疑似重复"被取消、抛出异常，前面已经真正存进数据库的行
+      // 会因为还留在表单里，下次重试这一组又被重复提交一遍。按对象本身摘不按下标，
+      // 摘掉前面的不会打乱后面还没提交的行在数组里的位置
+      form.rows = form.rows.filter((r) => r !== row);
     }
-    const flatIndexes = new Set(validRows.map((r) => r.flatIndex));
-    form.rows = form.rows.filter((_, idx) => !flatIndexes.has(idx));
   }
   if (invalidCount > 0) {
     ElMessage.warning(`这一组还有 ${invalidCount} 行没填完整，留在这一组里没保存，改完再点一次`);
@@ -972,6 +980,9 @@ onMounted(async () => {
                 </template>
               </el-table-column>
             </el-table>
+            <!-- 手动条目不预先摆出来，免得被当成一条"莫名其妙的待办"误点进去；真要补一行
+                 （比如这几张图本来就漏拍了一行），点这个再加，直接带进去填 -->
+            <el-button link type="primary" class="add-manual-link" @click="addManualRowAndOpen">+ 手动新增一行（没有对应图片）</el-button>
           </template>
           <div v-for="g in groupsToShow" :key="g.imageIdx ?? 'manual'" class="image-rows-group">
             <div v-if="g.imageUrl" class="image-panel-item">
@@ -1135,6 +1146,9 @@ onMounted(async () => {
   margin-bottom: 10px;
   color: #909399;
   font-size: 13px;
+}
+.add-manual-link {
+  margin-top: 10px;
 }
 .thumb {
   width: 24px;
