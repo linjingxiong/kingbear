@@ -285,9 +285,6 @@ const renderGroups = computed<RenderGroup[]>(() => {
 const isMultiImageBatch = ref(false);
 /** null = 显示总览列表；有值就是正在校对哪一组（取 groupKey 的返回值） */
 const activeGroupKey = ref<string | null>(null);
-/** 点过"校对完成并保存"的组记在这，总览列表里标"已校对"——图片下标当 key 不够用，手动组
- * 没有下标，统一换成字符串 */
-const completedGroupKeys = ref<Set<string>>(new Set());
 function groupKey(g: RenderGroup): string {
   return g.imageIdx != null ? String(g.imageIdx) : "manual";
 }
@@ -298,7 +295,11 @@ const listGroups = computed<RenderGroup[]>(() => {
   if (!isMultiImageBatch.value) return [];
   return renderGroups.value;
 });
-const completedCount = computed(() => listGroups.value.filter((g) => completedGroupKeys.value.has(groupKey(g))).length);
+// 一组校对完保存之后，这一组的行就从 form.rows 里摘空了——"是否已校对"直接看这一组现在
+// 还剩不剩行就行，不用另外记一份"校对完成"的状态。这样做还有个好处：退出弹窗再恢复草稿，
+// 之前已经校对完的组照样能正确显示"已校对"（草稿只存了 form 本身，没法知道"之前点过
+// 哪几个校对按钮"，但剩不剩行是能从草稿内容里直接算出来的）
+const completedCount = computed(() => listGroups.value.filter((g) => g.rows.length === 0).length);
 const activeGroup = computed<RenderGroup | undefined>(() =>
   activeGroupKey.value == null ? undefined : listGroups.value.find((g) => groupKey(g) === activeGroupKey.value),
 );
@@ -364,7 +365,6 @@ async function submitCurrentGroup() {
   if (!group) return;
   const ok = await submitGroupRows(group);
   if (!ok) return;
-  completedGroupKeys.value.add(groupKey(group));
   load();
   activeGroupKey.value = null;
   const remaining = listGroups.value.length - completedCount.value;
@@ -466,18 +466,24 @@ async function restoreDraft() {
     dialogMode.value = "create";
     editingId.value = null;
     if (d.factoryId) await loadProducts(d.factoryId);
+    const imageUrls: string[] = Array.isArray(d.imageUrls) ? d.imageUrls : d.imageUrl ? [d.imageUrl] : [];
     Object.assign(form, {
       factoryId: d.factoryId ?? "",
       returnDate: d.returnDate ?? "",
       remark: d.remark ?? "",
       // 改版之前存下的草稿是单张图（imageUrl 字符串），兼容一下，不然老草稿的图会丢
-      imageUrls: Array.isArray(d.imageUrls) ? d.imageUrls : d.imageUrl ? [d.imageUrl] : [],
+      imageUrls,
       // 改版之前存下的草稿没有 kind（那时候只有退货），恢复出来就当退货，别悄悄变成发料
       rows:
         Array.isArray(d.rows) && d.rows.length
           ? d.rows.map((r: Partial<RowItem>) => ({ ...blankRow("return"), ...r, kind: r.kind ?? "return" }))
           : [blankRow()],
     });
+    // 当初导入时选了不止一张图，才会走"校对工作台"（总览列表）那套——草稿本身没存这个
+    // 开关，按恢复出来的图片数量重新判断一遍，跟当初导入时的判断口径一致；activeGroupKey
+    // 置空，永远先停在总览列表，不会停在恢复前关闭弹窗那一刻碰巧停留的某一组详情页上
+    isMultiImageBatch.value = imageUrls.length > 1;
+    activeGroupKey.value = null;
     draftAvailable.value = false;
     dialogVisible.value = true;
   } catch {
@@ -514,7 +520,6 @@ function resetForm() {
   lastIssueProductGroupId.value = "";
   isMultiImageBatch.value = false;
   activeGroupKey.value = null;
-  completedGroupKeys.value = new Set();
 }
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
@@ -543,7 +548,6 @@ async function openEdit(row: InboundReturnListItem) {
   // 多图导入留下的"校对工作台"状态上——那条路是硬编码调 createInboundReturn 建新记录的
   isMultiImageBatch.value = false;
   activeGroupKey.value = null;
-  completedGroupKeys.value = new Set();
   await Promise.all([loadProducts(row.factoryId), loadProductGroups(row.factoryId)]);
   Object.assign(form, {
     factoryId: row.factoryId,
@@ -980,7 +984,7 @@ onMounted(async () => {
               </el-table-column>
               <el-table-column label="状态" width="100" align="center">
                 <template #default="{ row: g }">
-                  <el-tag v-if="completedGroupKeys.has(groupKey(g))" type="success">已校对</el-tag>
+                  <el-tag v-if="g.rows.length === 0" type="success">已校对</el-tag>
                   <el-tag v-else type="info">未校对</el-tag>
                 </template>
               </el-table-column>
