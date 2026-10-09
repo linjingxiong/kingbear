@@ -192,10 +192,7 @@ function blankRow(kind: OutboundKind = "issue"): RowItem {
   };
 }
 
-// form 要挪到这几个查重/分组 computed 前面声明：下面 pendingGroups 上挂的 watch() 一声明
-// 就会同步跑一次取初始值（不是只有 immediate:true 才会跑），这条链会一路连到 renderGroups
-// 再读到 form.imageUrls/form.rows——如果 form 还声明在文件后面，这时候就会命中 const 的
-// 暂时性死区，报"Cannot access 'form' before initialization"（线上刷出来的白屏就是这个）
+// form 挪到这几个查重/分组 computed 前面声明，这几个 computed 都要读 form.rows/form.imageUrls
 const form = reactive({
   factoryId: "",
   returnDate: "",
@@ -268,68 +265,90 @@ const renderGroups = computed<RenderGroup[]>(() => {
 });
 
 /**
- * 导了好几张图的时候，一组一组提交——跟单张录入一样点一下就存，存完自动把下一组还没提交的
- * 补上来显示，不用自己往下滚去找。只有一张图（或手动录入、编辑）还是走原来"一次性全部保存"
- * 那条路，不用为了这个场景多绕一圈。
+ * 导了好几张图的时候，先给一张"校对工作台"总览——每张图一行，标好校对状态，点"校对"
+ * 进这张图的明细编辑区，保存一次就把这张图标成"已校对"、自动跳回总览，不用自己记哪张弄完了。
+ * 只有一张图（或手动录入、编辑）还是走原来"一次性全部保存"那条路，不用为了这个场景多绕一圈。
+ * 只在真正导入多张图的时候才打开（importIssueFiles 里设），resetForm 时关掉。
  */
-// 已经提交完的组，行会从 form.rows 里摘掉，renderGroups 里这一组自然就空了——只给还有
-// 行的组编号，摘空的组从列表里消失，后一组自动顶上来占原来的位置，不用手动"前进"
-const pendingGroups = computed(() => renderGroups.value.filter((g) => g.rows.length > 0));
-// 导入时一次选了好几张图才打开，整个弹窗期间都按"一组一组提交"走，不随着提交到只剩最后
-// 一组就自动变回"保存"按钮——不然按钮文字在最后一组突然跳一下，让人以为哪里出错了。
-// 只在真正导入多张图的时候才打开（importIssueFiles 里设），resetForm 时关掉
 const isMultiImageBatch = ref(false);
-const currentGroupIdx = ref(0);
-watch(pendingGroups, (groups) => {
-  if (currentGroupIdx.value >= groups.length) currentGroupIdx.value = Math.max(0, groups.length - 1);
+/** null = 显示总览列表；有值就是正在校对哪一组（取 groupKey 的返回值） */
+const activeGroupKey = ref<string | null>(null);
+/** 点过"校对完成并保存"的组记在这，总览列表里标"已校对"——图片下标当 key 不够用，手动组
+ * 没有下标，统一换成字符串 */
+const completedGroupKeys = ref<Set<string>>(new Set());
+function groupKey(g: RenderGroup): string {
+  return g.imageIdx != null ? String(g.imageIdx) : "manual";
+}
+// 总览列表：每张图各一行；"手动新增"固定摆最后一行，哪怕暂时没有手动行也留着这个入口，
+// 图都校对完了想再手动补一行，不用现找地方加
+const listGroups = computed<RenderGroup[]>(() => {
+  if (!isMultiImageBatch.value) return [];
+  const imageGroups = renderGroups.value.filter((g) => g.imageIdx != null);
+  const manual = renderGroups.value.find((g) => g.imageIdx == null) ?? { imageIdx: null, imageUrl: null, rows: [] };
+  return [...imageGroups, manual];
 });
-const currentGroup = computed(() => pendingGroups.value[currentGroupIdx.value]);
-// 不是多图批次的时候，货号明细照常显示 renderGroups 里的全部组（通常也就一组）；
-// 是多图批次的时候，一次只显示当前这一组，不用滚动去找
-const groupsToShow = computed(() => (isMultiImageBatch.value ? (currentGroup.value ? [currentGroup.value] : []) : renderGroups.value));
+const completedCount = computed(() => listGroups.value.filter((g) => completedGroupKeys.value.has(groupKey(g))).length);
+const activeGroup = computed<RenderGroup | undefined>(() =>
+  activeGroupKey.value == null ? undefined : listGroups.value.find((g) => groupKey(g) === activeGroupKey.value),
+);
+// 不是多图批次：货号明细照常显示 renderGroups 里的全部组（通常也就一组）；
+// 是多图批次：总览列表时这里不显示，点进某一组之后只显示这一组
+const groupsToShow = computed(() => (isMultiImageBatch.value ? (activeGroup.value ? [activeGroup.value] : []) : renderGroups.value));
 
-/** 提交一组（一张图 + 它识别出来的那几行），成功就把这几行从 form.rows 里摘掉；
- * 不在这里弹提示/关弹窗，调用方根据摘完之后还剩不剩组来决定怎么收尾 */
+function openGroupDetail(key: string) {
+  activeGroupKey.value = key;
+}
+function backToList() {
+  activeGroupKey.value = null;
+}
+
+/** 保存一组（一张图 + 它识别出来的那几行）。组里只要有没填完整的行，这些行就不提交、也不
+ * 摘掉，留在这一组里改完再点一次——不像之前的写法，之前只要组里有一行填好了，就会把"没填好
+ * 的那些行"也一并悄悄从表单里删掉，等于没保存就把数据丢了，这里改正过来了 */
 async function submitGroupRows(group: RenderGroup): Promise<boolean> {
-  const valid = group.rows.map((r) => r.row).filter(rowIsValid);
-  if (!valid.length) {
+  const validRows = group.rows.filter((r) => rowIsValid(r.row));
+  const invalidCount = group.rows.length - validRows.length;
+  if (group.rows.length > 0 && !validRows.length) {
     ElMessage.warning("请至少填好一行：退货要选货号+填重量(斤)，发料要填物料名称+填重量(斤)");
     return false;
   }
-  await Promise.all(valid.map(ensureMaterialInGroup));
-  for (const row of valid) {
-    // 这一行只带它自己来源的那张图，不是这批导入的图全部塞给每一行
-    const images = row.sourceImageIdx != null ? [form.imageUrls[row.sourceImageIdx]].filter(Boolean) : [];
-    const dto: CreateInboundReturnDto = {
-      kind: row.kind,
-      factoryId: form.factoryId,
-      ...buildRowFields(row),
-      returnDate: form.returnDate,
-      reason: row.reason,
-      remark: form.remark,
-      images,
-    };
-    await submitWithDuplicateConfirm(dto, createInboundReturn);
+  if (validRows.length) {
+    await Promise.all(validRows.map((r) => ensureMaterialInGroup(r.row)));
+    for (const { row } of validRows) {
+      // 这一行只带它自己来源的那张图，不是这批导入的图全部塞给每一行
+      const images = row.sourceImageIdx != null ? [form.imageUrls[row.sourceImageIdx]].filter(Boolean) : [];
+      const dto: CreateInboundReturnDto = {
+        kind: row.kind,
+        factoryId: form.factoryId,
+        ...buildRowFields(row),
+        returnDate: form.returnDate,
+        reason: row.reason,
+        remark: form.remark,
+        images,
+      };
+      await submitWithDuplicateConfirm(dto, createInboundReturn);
+    }
+    const flatIndexes = new Set(validRows.map((r) => r.flatIndex));
+    form.rows = form.rows.filter((_, idx) => !flatIndexes.has(idx));
   }
-  const flatIndexes = new Set(group.rows.map((r) => r.flatIndex));
-  form.rows = form.rows.filter((_, idx) => !flatIndexes.has(idx));
+  if (invalidCount > 0) {
+    ElMessage.warning(`这一组还有 ${invalidCount} 行没填完整，留在这一组里没保存，改完再点一次`);
+    return false;
+  }
   return true;
 }
 
 async function submitCurrentGroup() {
   await formRef.value?.validate();
-  const group = currentGroup.value;
+  const group = activeGroup.value;
   if (!group) return;
   const ok = await submitGroupRows(group);
   if (!ok) return;
+  completedGroupKeys.value.add(groupKey(group));
   load();
-  if (pendingGroups.value.length === 0) {
-    ElMessage.success("这批出库单全部提交完成");
-    clearDraft();
-    dialogVisible.value = false;
-  } else {
-    ElMessage.success(`已保存，自动切到下一组（还剩 ${pendingGroups.value.length} 组）`);
-  }
+  activeGroupKey.value = null;
+  const remaining = listGroups.value.length - completedCount.value;
+  ElMessage.success(remaining === 0 ? "全部校对完成，可以点下面「关闭」了" : `已保存，返回列表（还剩 ${remaining} 张未校对）`);
 }
 
 // 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
@@ -457,7 +476,7 @@ watch(
   () => form.imageUrls,
   () => {
     resetSlipZoomStates();
-    currentGroupIdx.value = 0;
+    activeGroupKey.value = null;
   },
 );
 watch(dialogVisible, (open) => {
@@ -474,7 +493,8 @@ function resetForm() {
   });
   lastIssueProductGroupId.value = "";
   isMultiImageBatch.value = false;
-  currentGroupIdx.value = 0;
+  activeGroupKey.value = null;
+  completedGroupKeys.value = new Set();
 }
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
@@ -500,9 +520,10 @@ async function openEdit(row: InboundReturnListItem) {
   dialogMode.value = "edit";
   editingId.value = row.id;
   // 编辑永远走"一次性保存"（调用 updateInboundReturn，不是新建）那条路，不能停在上一次
-  // 多图导入留下的"一组一组提交"状态上——那条路是硬编码调 createInboundReturn 建新记录的
+  // 多图导入留下的"校对工作台"状态上——那条路是硬编码调 createInboundReturn 建新记录的
   isMultiImageBatch.value = false;
-  currentGroupIdx.value = 0;
+  activeGroupKey.value = null;
+  completedGroupKeys.value = new Set();
   await Promise.all([loadProducts(row.factoryId), loadProductGroups(row.factoryId)]);
   Object.assign(form, {
     factoryId: row.factoryId,
@@ -913,9 +934,45 @@ onMounted(async () => {
             </div>
           </el-alert>
 
-          <!-- 导了好几张图的时候一组一组来，一次只显示当前这一组（groupsToShow 只有它一个），
-               提交这一组之后自动换下一组，不用滚动去找；只有一组（手动录入/单张图/编辑）就
+          <!-- 导了好几张图的时候先给一张"校对工作台"总览：每张图一行，标好校对状态，点
+               "校对"进这张图的明细编辑区，只有一组（手动录入/单张图/编辑）就跳过总览，
                照常全部显示，走原来"一次性保存"那个按钮 -->
+          <template v-if="isMultiImageBatch && !activeGroup">
+            <div class="review-hint">多张图导入，按图校对：点"校对"看这张图识别出来的物料，改完保存会自动标这张图校对完成</div>
+            <el-table :data="listGroups" size="small" border>
+              <el-table-column label="图片" width="76">
+                <template #default="{ row: g }">
+                  <el-image
+                    v-if="g.imageUrl"
+                    :src="g.imageUrl"
+                    :preview-src-list="[g.imageUrl]"
+                    hide-on-click-modal
+                    preview-teleported
+                    fit="cover"
+                    class="thumb"
+                  />
+                  <span v-else class="muted">手动</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="来源">
+                <template #default="{ row: g }">{{ g.imageIdx != null ? `第 ${g.imageIdx + 1} 张` : "手动新增 / 补录" }}</template>
+              </el-table-column>
+              <el-table-column label="待处理行数" width="110" align="center">
+                <template #default="{ row: g }">{{ g.rows.length }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100" align="center">
+                <template #default="{ row: g }">
+                  <el-tag v-if="completedGroupKeys.has(groupKey(g))" type="success">已校对</el-tag>
+                  <el-tag v-else type="info">未校对</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="90" align="center">
+                <template #default="{ row: g }">
+                  <el-button link type="primary" @click="openGroupDetail(groupKey(g))">校对</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </template>
           <div v-for="g in groupsToShow" :key="g.imageIdx ?? 'manual'" class="image-rows-group">
             <div v-if="g.imageUrl" class="image-panel-item">
               <div
@@ -1039,12 +1096,11 @@ onMounted(async () => {
       </el-form>
 
       <template #footer>
-        <span v-if="isMultiImageBatch" class="progress-hint">
-          第 {{ currentGroupIdx + 1 }} / {{ pendingGroups.length }} 组
-        </span>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button v-if="isMultiImageBatch" type="primary" @click="submitCurrentGroup">提交这一组</el-button>
-        <el-button v-else type="primary" @click="handleSubmit">保存</el-button>
+        <span v-if="isMultiImageBatch" class="progress-hint"> 已校对 {{ completedCount }} / {{ listGroups.length }} 张 </span>
+        <el-button @click="dialogVisible = false">{{ isMultiImageBatch && !activeGroup ? "关闭" : "取消" }}</el-button>
+        <el-button v-if="isMultiImageBatch && activeGroup" @click="backToList">返回列表</el-button>
+        <el-button v-if="isMultiImageBatch && activeGroup" type="primary" @click="submitCurrentGroup">校对完成并保存</el-button>
+        <el-button v-if="!isMultiImageBatch" type="primary" @click="handleSubmit">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -1072,6 +1128,11 @@ onMounted(async () => {
 }
 .progress-hint {
   margin-right: auto;
+  color: #909399;
+  font-size: 13px;
+}
+.review-hint {
+  margin-bottom: 10px;
   color: #909399;
   font-size: 13px;
 }
