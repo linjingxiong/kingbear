@@ -345,8 +345,13 @@ async function recognizeGroupImage(imageIdx: number) {
 async function reviewGroup(key: string) {
   activeGroupKey.value = key;
   const g = listGroups.value.find((x) => groupKey(x) === key);
-  if (g?.imageIdx != null && g.rows.length === 0 && pendingIssueFiles.value[g.imageIdx]) {
+  if (g?.imageIdx == null || g.rows.length > 0) return;
+  if (pendingIssueFiles.value[g.imageIdx]) {
     await recognizeGroupImage(g.imageIdx);
+  } else {
+    // 页面刷新或者恢复草稿之后，原始文件对象留不住（没法存进 localStorage），没法重新
+    // 自动识别——图还在（缩略图能看），只是没法再点一下就自动识别了，讲清楚免得以为卡住了
+    ElMessage.warning('这张图的原始文件已经丢失（刷新页面/恢复草稿后找不到了），没法自动识别。可以对着上面的原图手动点"+ 添加一行"补，或者去工具栏重新导入这一张');
   }
 }
 function backToList() {
@@ -452,6 +457,9 @@ const pendingIssueFiles = ref<(File | null)[]>([]);
 /** 正在识别哪几张图（下标集合），详情区显示"识别中…"，不是永久的空行编辑区——用集合不用
  * 单个值，是因为允许同时识别好几张（先点了 A 还没识别完又点了 B，两边各识别各的，互不耽误） */
 const recognizingImageIdxs = ref<Set<number>>(new Set());
+/** 这次打开弹窗是不是从草稿恢复出来的——草稿恢复不出原始文件，总览列表里"0 行"跟"这张图
+ * 原始文件已经丢了、没法再自动识别"要分开显示，不然看着像没识别出东西，其实是没法识别了 */
+const restoredFromDraft = ref(false);
 
 const rules = {
   factoryId: [{ required: true, message: "请选择玩具厂", trigger: "change" }],
@@ -528,23 +536,34 @@ async function restoreDraft() {
     pendingIssueFiles.value = [];
     recognizingImageIdxs.value = new Set();
     const imageUrls: string[] = Array.isArray(d.imageUrls) ? d.imageUrls : d.imageUrl ? [d.imageUrl] : [];
+    // 多图批次现在是点开"校对"才逐张识别，草稿存下的时候完全可能一行都还没识别出来
+    // （比如刚导入就退出了）——这种情况下 d.rows 是空的很正常，不该硬塞一行假的"手动新增"
+    // 行进去（那样这张图反而没法再正常走"校对"识别了）。只有单张图（原来就是"识别完直接
+    // 进详情"那条路）才需要兜底一行空的，不然详情区连个可编辑的行都没有
+    const rows: RowItem[] =
+      Array.isArray(d.rows) && d.rows.length
+        ? d.rows.map((r: Partial<RowItem>) => ({ ...blankRow("return"), ...r, kind: r.kind ?? "return" }))
+        : imageUrls.length > 1
+          ? []
+          : [blankRow()];
     Object.assign(form, {
       factoryId: d.factoryId ?? "",
       returnDate: d.returnDate ?? "",
       remark: d.remark ?? "",
       // 改版之前存下的草稿是单张图（imageUrl 字符串），兼容一下，不然老草稿的图会丢
       imageUrls,
-      // 改版之前存下的草稿没有 kind（那时候只有退货），恢复出来就当退货，别悄悄变成发料
-      rows:
-        Array.isArray(d.rows) && d.rows.length
-          ? d.rows.map((r: Partial<RowItem>) => ({ ...blankRow("return"), ...r, kind: r.kind ?? "return" }))
-          : [blankRow()],
+      rows,
     });
+    // 草稿存下的时候可能还没走到"选玩具厂"这一步（比如多图批次刚导入、一张都没点校对就
+    // 退出了），恢复出来玩具厂是空的——跟新开一张单子一样，缺了就按惯例默认选"美奇"，
+    // 不用恢复完还要再手动选一遍
+    if (!form.factoryId) await applyDefaultFactory();
     // 当初导入时选了不止一张图，才会走"校对工作台"（总览列表）那套——草稿本身没存这个
     // 开关，按恢复出来的图片数量重新判断一遍，跟当初导入时的判断口径一致；activeGroupKey
     // 置空，永远先停在总览列表，不会停在恢复前关闭弹窗那一刻碰巧停留的某一组详情页上
     isMultiImageBatch.value = imageUrls.length > 1;
     activeGroupKey.value = null;
+    restoredFromDraft.value = true;
     try {
       const reviewedRaw = localStorage.getItem(REVIEWED_KEY);
       completedGroupKeys.value = new Set(reviewedRaw ? JSON.parse(reviewedRaw) : []);
@@ -595,6 +614,7 @@ function resetForm() {
   completedGroupKeys.value = new Set();
   pendingIssueFiles.value = [];
   recognizingImageIdxs.value = new Set();
+  restoredFromDraft.value = false;
 }
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
@@ -630,6 +650,7 @@ async function openEdit(row: InboundReturnListItem) {
   }
   pendingIssueFiles.value = [];
   recognizingImageIdxs.value = new Set();
+  restoredFromDraft.value = false;
   await Promise.all([loadProducts(row.factoryId), loadProductGroups(row.factoryId)]);
   Object.assign(form, {
     factoryId: row.factoryId,
@@ -1083,6 +1104,12 @@ onMounted(async () => {
                 <template #default="{ row: g }">
                   <span v-if="g.imageIdx != null && recognizingImageIdxs.has(g.imageIdx)" class="muted">识别中…</span>
                   <span v-else-if="g.imageIdx != null && pendingIssueFiles[g.imageIdx]" class="muted">待识别</span>
+                  <span
+                    v-else-if="g.imageIdx != null && g.rows.length === 0 && restoredFromDraft"
+                    class="muted"
+                    title="刷新页面/恢复草稿之后，这张图的原始文件对象留不住，没法重新自动识别"
+                    >文件已丢失</span
+                  >
                   <span v-else>{{ g.rows.length }}</span>
                 </template>
               </el-table-column>
