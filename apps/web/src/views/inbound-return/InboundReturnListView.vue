@@ -333,6 +333,7 @@ async function recognizeGroupImage(imageIdx: number) {
       });
     }
     pendingIssueFiles.value[imageIdx] = null;
+    void deletePendingFile(imageIdx);
   } catch {
     ElMessage.error("这张图识别失败，再点一次「校对」重试");
   } finally {
@@ -474,6 +475,78 @@ const DRAFT_KEY = "kingbear-inbound-return-draft";
 const REVIEWED_KEY = "kingbear-inbound-return-draft-reviewed";
 const draftAvailable = ref(false);
 
+/* ---------- 多图批次还没识别的原始文件：localStorage 存不了 File，这几张图存 IndexedDB
+   里——这样退出弹窗（甚至刷新页面）之后点"恢复"，没点过"校对"的那几张图还能接着自动识别，
+   不是只能干看着图自己手动抄。按图片下标存，哪张图都是开新一批（importIssueFilesLazy）
+   先清空、再逐张存进去；识别完或者彻底放弃这批草稿，对应那条/整批就从 IndexedDB 里删掉，
+   不会无限攒下去。任何一步失败（比如浏览器禁用了 IndexedDB）都只是退化成"这张图没法重新
+   识别"，不影响表单本身的功能 ---------- */
+const PENDING_FILES_DB = "kingbear-inbound-return-files";
+function openPendingFilesDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PENDING_FILES_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("files");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function savePendingFiles(files: File[]) {
+  try {
+    const db = await openPendingFilesDb();
+    const tx = db.transaction("files", "readwrite");
+    tx.objectStore("files").clear();
+    files.forEach((f, idx) => tx.objectStore("files").put(f, idx));
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch {
+    // 存不进去（比如隐私模式/浏览器不支持）就算了，退出去再恢复那几张没点过"校对"的图
+    // 就没法自动识别了，不影响当场这一批照常用
+  }
+}
+async function loadPendingFiles(count: number): Promise<(File | null)[]> {
+  try {
+    const db = await openPendingFilesDb();
+    const tx = db.transaction("files", "readonly");
+    const store = tx.objectStore("files");
+    const result = await Promise.all(
+      Array.from({ length: count }, (_, idx) => {
+        return new Promise<File | null>((resolve) => {
+          const req = store.get(idx);
+          req.onsuccess = () => resolve((req.result as File) ?? null);
+          req.onerror = () => resolve(null);
+        });
+      }),
+    );
+    db.close();
+    return result;
+  } catch {
+    return Array.from({ length: count }, () => null);
+  }
+}
+async function deletePendingFile(idx: number) {
+  try {
+    const db = await openPendingFilesDb();
+    const tx = db.transaction("files", "readwrite");
+    tx.objectStore("files").delete(idx);
+    db.close();
+  } catch {
+    /* ignore */
+  }
+}
+async function clearPendingFiles() {
+  try {
+    const db = await openPendingFilesDb();
+    const tx = db.transaction("files", "readwrite");
+    tx.objectStore("files").clear();
+    db.close();
+  } catch {
+    /* ignore */
+  }
+}
+
 function formHasContent() {
   return !!(
     form.factoryId ||
@@ -510,6 +583,7 @@ function clearDraft() {
   } catch {
     /* ignore */
   }
+  void clearPendingFiles();
   draftAvailable.value = false;
 }
 function checkDraft() {
@@ -527,15 +601,17 @@ async function restoreDraft() {
     dialogMode.value = "create";
     editingId.value = null;
     if (d.factoryId) await loadProducts(d.factoryId);
-    // 原始文件对象存不进 localStorage，草稿里不管存的是哪张图，这里都没法重新识别了——
-    // 清空候选文件列表；老的 blob: 预览地址（没识别完就退出攒下的）也一并放掉，反正重新
-    // 打开页面它们本来就已经失效了，留着也没用
+    // 老的 blob: 预览地址（没识别完就退出攒下的）放掉，反正重新打开页面它们本来就已经
+    // 失效了，留着也没用——原始文件对象本身另外存在 IndexedDB 里，不受这个影响
     for (const url of form.imageUrls) {
       if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
     }
-    pendingIssueFiles.value = [];
     recognizingImageIdxs.value = new Set();
     const imageUrls: string[] = Array.isArray(d.imageUrls) ? d.imageUrls : d.imageUrl ? [d.imageUrl] : [];
+    // 没点过"校对"的那几张图，原始文件存在 IndexedDB 里，这里尽量读回来——读不到（比如
+    // 这份草稿是改用 IndexedDB 存文件之前存下的老草稿，或者浏览器清过缓存）就是 null，
+    // 跟"文件已丢失"那套提示自然衔接上，不用额外判断
+    pendingIssueFiles.value = await loadPendingFiles(imageUrls.length);
     // 多图批次现在是点开"校对"才逐张识别，草稿存下的时候完全可能一行都还没识别出来
     // （比如刚导入就退出了）——这种情况下 d.rows 是空的很正常，不该硬塞一行假的"手动新增"
     // 行进去（那样这张图反而没法再正常走"校对"识别了）。只有单张图（原来就是"识别完直接
@@ -615,6 +691,10 @@ function resetForm() {
   pendingIssueFiles.value = [];
   recognizingImageIdxs.value = new Set();
   restoredFromDraft.value = false;
+  // 这里不清 IndexedDB 里存的原始文件：如果是开一批新的多图导入，紧接着
+  // importIssueFilesLazy 会自己存新文件进去、顺带把旧的清掉（见 savePendingFiles）；
+  // 如果只是单纯关掉弹窗、草稿还留着没丢弃，那几张没点过"校对"的图就应该继续留着，
+  // 不然"恢复"出来又要退化成没法自动识别了
 }
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
@@ -829,6 +909,9 @@ async function importIssueFilesLazy(files: File[]) {
   pendingIssueFiles.value = [...files];
   form.rows = [];
   isMultiImageBatch.value = true;
+  // 顺手把原始文件存进 IndexedDB——退出弹窗（甚至刷新页面）之后点"恢复"，没点过"校对"
+  // 的那几张图还能接着自动识别，不是只能对着图自己手抄
+  await savePendingFiles(files);
 
   dialogVisible.value = true;
   ElMessage.success(`已导入 ${files.length} 张图，点每一行的"校对"再逐张识别，不用等全部识别完才能看`);
