@@ -15,7 +15,7 @@ import { UpdateInboundReturnDto } from './dto/update-inbound-return.dto';
 // "inferred type cannot be named"，这里手动给个显式类型（跟 factory.service 同样的坑）
 export interface InboundReturnListItem {
   id: string;
-  kind: 'issue' | 'return';
+  kind: 'issue' | 'return' | 'materialReturn';
   factoryId: string;
   productId: string | null;
   sku: string;
@@ -64,7 +64,9 @@ export class InboundReturnService {
     if (!dto.force) {
       const existing = await this.findDuplicate(dto);
       if (existing) {
-        const label = dto.kind === 'issue' ? `物料「${existing.materialName}」` : `货号「${existing.sku}」`;
+        // 发料/退料都是按物料名称记的，没有货号——只有退货才按货号；要显式判断
+        // "是不是退货"（=== 'return'），不能用 !== 'issue'，退料也会命中 !== 'issue'
+        const label = (dto.kind ?? 'return') === 'return' ? `货号「${existing.sku}」` : `物料「${existing.materialName}」`;
         throw new ConflictException({
           message: `同一个玩具厂、同一天、同样的${label}、同样的量，已经录过一条了，是不是重复录入了？`,
           duplicateType: 'item',
@@ -77,16 +79,21 @@ export class InboundReturnService {
   }
 
   /**
-   * 出库单查重：发料按"物料名称+重量"比对（原材料没有货号），退货按"货号+数量"比对
-   *（跟入库单的查重同一个口径：数量比重量/克重稳定，不比对克重）。同一个玩具厂、同一天，
-   * 只跟这条最新记录撞上就算疑似重复——不管新建时是不是同一批一起提交的。
+   * 出库单查重：发料/退料按"物料名称+重量"比对（原材料没有货号，且只跟同一种 kind 自己
+   * 比——同一天发了 10 斤又退了 10 斤同一种料，这是两件真实发生的事，不是重复录入）；
+   * 退货按"货号+数量"比对（跟入库单的查重同一个口径：数量比重量/克重稳定，不比对克重）。
+   * 同一个玩具厂、同一天，只跟这条最新记录撞上就算疑似重复——不管新建时是不是同一批
+   * 一起提交的。
    */
   private async findDuplicate(dto: CreateInboundReturnDto) {
     const { start, end } = dayRange(dto.returnDate);
+    const kind = dto.kind ?? 'return';
     const query =
-      dto.kind === 'issue'
-        ? { kind: 'issue', factoryId: dto.factoryId, materialName: (dto.materialName ?? '').trim(), weightJin: dto.weightJin }
-        : { kind: { $ne: 'issue' }, factoryId: dto.factoryId, sku: dto.sku, qty: dto.qty };
+      kind === 'return'
+        ? // 老记录没有 kind 字段，也要当"退货"处理——用 $nin 排除 issue/materialReturn，
+          // 而不是只匹配 kind: 'return'，不然会漏掉这些没有 kind 字段的老记录
+          { kind: { $nin: ['issue', 'materialReturn'] }, factoryId: dto.factoryId, sku: dto.sku, qty: dto.qty }
+        : { kind, factoryId: dto.factoryId, materialName: (dto.materialName ?? '').trim(), weightJin: dto.weightJin };
     return this.returnModel.findOne({ ...query, returnDate: { $gte: start, $lt: end } } as never);
   }
 

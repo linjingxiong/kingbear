@@ -55,7 +55,7 @@ const productGroups = ref<ProductGroup[]>([]);
 const list = ref<InboundReturnListItem[]>([]);
 const loading = ref(false);
 
-const KIND_LABEL: Record<OutboundKind, string> = { issue: "发料", return: "退货" };
+const KIND_LABEL: Record<OutboundKind, string> = { issue: "发料", return: "退货", materialReturn: "退料" };
 // el-table 插槽里的 row 是 any，直接 KIND_LABEL[row.kind] 过不了类型检查，包一层函数
 function kindLabel(kind: OutboundKind) {
   return KIND_LABEL[kind];
@@ -94,11 +94,13 @@ const listDuplicateGroups = computed<ListDuplicateGroup[]>(() => {
     if (!day) continue;
     let key: string;
     let label: string;
-    if (r.kind === "issue") {
+    if (r.kind === "issue" || r.kind === "materialReturn") {
       const name = (r.materialName || r.name || "").trim();
       if (!name) continue;
-      key = `issue:${r.factoryId}:${day}:${name}:${r.weightJin}`;
-      label = `${r.factoryName} · ${day} · 发料 · 物料「${name}」· 重量 ${r.weightJin} 斤`;
+      // 发料和退料各自只跟同一种 kind 比——同一天发了又退了同一种料是两件真事，
+      // 不是重复录入，key 前缀按 kind 分开，不会互相当成对方的重复
+      key = `${r.kind}:${r.factoryId}:${day}:${name}:${r.weightJin}`;
+      label = `${r.factoryName} · ${day} · ${r.kind === "issue" ? "发料" : "退料"} · 物料「${name}」· 重量 ${r.weightJin} 斤`;
     } else {
       if (!r.sku) continue;
       key = `return:${r.factoryId}:${day}:${r.sku}:${r.qty}`;
@@ -134,10 +136,10 @@ function materialOptionsFor(row: RowItem): string[] {
   return productGroups.value.find((g) => g.id === row.productGroupId)?.materials.map((m) => m.name) ?? [];
 }
 
-/** 发料行填的物料名称，如果这个产品的物料清单里还没有，保存时顺手记进这个产品的物料清单，
- * 下次同一个产品就能直接选了——跟"资产类型"名录是同一个思路 */
+/** 发料/退料行填的物料名称，如果这个产品的物料清单里还没有，保存时顺手记进这个产品的物料
+ * 清单，下次同一个产品就能直接选了——跟"资产类型"名录是同一个思路 */
 async function ensureMaterialInGroup(row: RowItem) {
-  if (row.kind !== "issue" || !row.productGroupId) return;
+  if (row.kind === "return" || !row.productGroupId) return;
   const group = productGroups.value.find((g) => g.id === row.productGroupId);
   const name = row.materialName.trim();
   if (!group || !name || group.materials.some((m) => m.name === name)) return;
@@ -232,11 +234,11 @@ const duplicateGroups = computed<DuplicateGroup[]>(() => {
   form.rows.forEach((row, idx) => {
     let key: string;
     let label: string;
-    if (row.kind === "issue") {
+    if (row.kind === "issue" || row.kind === "materialReturn") {
       const name = row.materialName.trim();
       if (!name || row.weightJin <= 0) return;
-      key = `issue:${name}:${row.weightJin}`;
-      label = `发料 · 物料「${name}」· 重量 ${row.weightJin} 斤`;
+      key = `${row.kind}:${name}:${row.weightJin}`;
+      label = `${row.kind === "issue" ? "发料" : "退料"} · 物料「${name}」· 重量 ${row.weightJin} 斤`;
     } else {
       if (!row.productId || row.weightJin <= 0) return;
       const product = productsByFactory.value.find((p) => p.id === row.productId);
@@ -451,7 +453,7 @@ function onRowProductGroupChange(row: RowItem) {
   // 不用每行重选
   lastIssueProductGroupId.value = row.productGroupId;
   for (const r of form.rows) {
-    if (r === row || r.kind !== "issue") continue;
+    if (r === row || r.kind === "return") continue;
     if (r.sourceImageIdx === row.sourceImageIdx) {
       // 同一张图识别出来的这一组，点了这一组里某一行的产品，这一组其余行都跟着换成
       // 一样的——不管这些行原来是空的，还是识别的时候已经顺手带上了别的产品（比如带的
@@ -865,7 +867,8 @@ function rowIsValid(r: RowItem) {
   return r.kind === "return" ? !!r.productId && r.weightJin > 0 : !!r.materialName.trim() && r.weightJin > 0;
 }
 
-/** 一行的数据拼成要提交的字段（退货/发料两套完全不同的字段） */
+/** 一行的数据拼成要提交的字段（退货是一套，发料/退料是另一套——退料跟发料字段形状
+ * 完全一样，用同一个分支） */
 function buildRowFields(row: RowItem) {
   if (row.kind === "return") {
     const product = productsByFactory.value.find((p) => p.id === row.productId);
@@ -881,7 +884,7 @@ function buildRowFields(row: RowItem) {
       factoryPrice: product?.factoryPrice ?? 0,
     };
   }
-  // 发料：原材料没有货号，qty 就直接等于重量(斤)——发料不参与账单，qty 只是满足字段必填
+  // 发料/退料：原材料没有货号，qty 就直接等于重量(斤)——都不参与账单，qty 只是满足字段必填
   return {
     productId: null,
     sku: "",
@@ -983,6 +986,7 @@ onMounted(async () => {
       <el-radio-group v-model="kindFilter" size="default" class="kind-filter">
         <el-radio-button value="">全部</el-radio-button>
         <el-radio-button value="issue">发料</el-radio-button>
+        <el-radio-button value="materialReturn">退料</el-radio-button>
         <el-radio-button value="return">退货</el-radio-button>
       </el-radio-group>
     </div>
@@ -1019,7 +1023,7 @@ onMounted(async () => {
       </el-table-column>
       <el-table-column prop="factoryName" label="玩具厂" width="140" />
       <el-table-column label="产品" width="110" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.kind === "issue" ? row.productGroupName || "-" : "-" }}</template>
+        <template #default="{ row }">{{ row.kind === "issue" || row.kind === "materialReturn" ? row.productGroupName || "-" : "-" }}</template>
       </el-table-column>
       <el-table-column label="货号" width="100">
         <template #default="{ row }">{{ row.kind === "return" ? row.sku : "-" }}</template>
@@ -1205,11 +1209,12 @@ onMounted(async () => {
                   :class="{ 'kind-select--return': r.row.kind === 'return' }"
                 >
                   <el-option label="发料" value="issue" />
+                  <el-option label="退料" value="materialReturn" />
                   <el-option label="退货" value="return" />
                 </el-select>
 
                 <el-select
-                  v-if="r.row.kind === 'issue'"
+                  v-if="r.row.kind === 'issue' || r.row.kind === 'materialReturn'"
                   v-model="r.row.productGroupId"
                   filterable
                   clearable

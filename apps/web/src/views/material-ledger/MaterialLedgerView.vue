@@ -5,7 +5,7 @@ import type { FactoryListItem, InboundReturnListItem } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { listInboundReturns } from "../../api/inbound-return";
 
-// 物料台账：先只管"玩具厂发给我多少物料"这一段（出库单·发料）。选玩具厂、选月份，
+// 物料台账：先只管"玩具厂发给我多少物料"这一段（出库单·发料，净掉退料）。选玩具厂、选月份，
 // 直接在这一页看对账表——不用先看一个厂列表、点进去才看明细，一步到位。
 // 数据直接复用出库单列表接口，前端自己汇总，没有新接口。
 const factories = ref<FactoryListItem[]>([]);
@@ -26,10 +26,12 @@ async function load() {
   }
 }
 
+// 发料（issue）和退料（materialReturn，没用完退回去的料）都要算进来——退料是发料的
+// 反向，物料台账看的是"实际净收到了多少"，不是把两种分开各看各的流水
 const factoryRows = computed(() =>
   list.value.filter(
     (r) =>
-      r.kind === "issue" &&
+      (r.kind === "issue" || r.kind === "materialReturn") &&
       r.factoryId === factoryId.value &&
       (!yearMonth.value || (r.returnDate ?? "").startsWith(yearMonth.value)),
   ),
@@ -73,7 +75,10 @@ const productPivots = computed<ProductPivot[]>(() => {
       const date = (r.returnDate ?? "").slice(0, 10);
       if (!byDate.has(date)) byDate.set(date, { values: {}, images: new Set() });
       const d = byDate.get(date)!;
-      d.values[materialName] = (d.values[materialName] ?? 0) + r.weightJin;
+      // 退料是发料的反向，净重量里减掉——同一天同一种物料发了又退了，这一格最终显示的
+      // 是"发 - 退"的净数，不是两条流水简单相加
+      const signedWeight = r.kind === "materialReturn" ? -r.weightJin : r.weightJin;
+      d.values[materialName] = (d.values[materialName] ?? 0) + signedWeight;
       for (const url of r.images ?? []) d.images.add(url);
     }
     const materials = [...materialsSet].sort((a, b) => a.localeCompare(b));
@@ -163,8 +168,8 @@ onMounted(async () => {
   <div v-loading="loading">
     <el-alert type="info" :closable="false" show-icon class="scope-hint">
       <template #title>
-        这里先只算"玩具厂发料给我"收到的物料（出库单·发料）。发给代工厂的那部分（物料流转-物料对账）
-        还没接进来算结余，先看清楚收了多少
+        这里先只算"玩具厂发料给我"收到的物料（出库单·发料，没用完退回去的"退料"会从这里扣掉，
+        看到的是净数）。发给代工厂的那部分（物料流转-物料对账）还没接进来算结余，先看清楚收了多少
       </template>
     </el-alert>
 

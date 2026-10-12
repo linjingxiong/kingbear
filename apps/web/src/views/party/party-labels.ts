@@ -20,6 +20,7 @@ export function sourceRoute(source: LedgerSource): { path: string; query?: Recor
       return { path: "/inbound" };
     case "outbound_issue":
     case "outbound_return":
+    case "outbound_material_return":
       return { path: "/inbound", query: { tab: "return" } };
     case "material_issuance":
       return { path: "/material-flow" };

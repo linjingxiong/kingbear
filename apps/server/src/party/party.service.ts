@@ -256,24 +256,27 @@ export class PartyService {
     }
     for (const r of outbounds) {
       // 老记录没有 kind 字段（这张表最早只存退货），当退货处理
-      const isIssue = r.kind === 'issue';
-      // 发料记的是原材料（物料名称+重量），退货记的是已经入库过的成品/半成品（货号）——
-      // 两种性质不同，itemKind/itemKey 不能都按货号算，发料没有货号
+      const kind = r.kind ?? 'return';
+      // 发料/退料记的是原材料（物料名称+重量），退货记的是已经入库过的成品/半成品
+      // （货号）——性质不同，itemKind/itemKey 不能都按货号算，发料/退料没有货号。
+      // 发料是料从玩具厂流出（出库）；退料是没用完的料流回玩具厂，方向跟发料相反
+      // （入库）；退货是不合格的货退回给我，站在玩具厂角度货也是离开它（出库）
+      const isMaterial = kind !== 'return';
       rows.push({
         key: `outbound:${r._id}`,
-        source: isIssue ? 'outbound_issue' : 'outbound_return',
+        source: kind === 'issue' ? 'outbound_issue' : kind === 'materialReturn' ? 'outbound_material_return' : 'outbound_return',
         sourceId: String(r._id),
         date: r.returnDate.toISOString(),
-        direction: 'out',
-        typeLabel: isIssue ? '出库单·发料' : '出库单·退货',
-        itemKind: isIssue ? 'material' : 'product',
-        itemKey: isIssue ? r.materialName || r.name : r.sku,
-        itemName: isIssue ? r.materialName || r.name : r.name,
-        sku: isIssue ? undefined : r.sku,
-        group: isIssue && r.productGroupId ? groupName.get(String(r.productGroupId)) : undefined,
+        direction: kind === 'materialReturn' ? 'in' : 'out',
+        typeLabel: kind === 'issue' ? '出库单·发料' : kind === 'materialReturn' ? '出库单·退料' : '出库单·退货',
+        itemKind: isMaterial ? 'material' : 'product',
+        itemKey: isMaterial ? r.materialName || r.name : r.sku,
+        itemName: isMaterial ? r.materialName || r.name : r.name,
+        sku: isMaterial ? undefined : r.sku,
+        group: isMaterial && r.productGroupId ? groupName.get(String(r.productGroupId)) : undefined,
         qty: r.qty,
         weightJin: r.weightJin,
-        unitWeightG: isIssue ? undefined : r.unitWeightG,
+        unitWeightG: isMaterial ? undefined : r.unitWeightG,
         reason: r.reason || undefined,
         remark: r.remark,
         images: r.images ?? [],

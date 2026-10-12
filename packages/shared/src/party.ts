@@ -26,6 +26,7 @@ export type LedgerSource =
   | "inbound" // 玩具厂入库单：我交的货流进玩具厂 → 入库
   | "outbound_issue" // 玩具厂出库单·发料：玩具厂发原料/半成品给我 → 出库
   | "outbound_return" // 玩具厂出库单·退货：不合格的货退回给我 → 出库
+  | "outbound_material_return" // 玩具厂出库单·退料：没用完的原料退回给玩具厂（发料的反向）→ 入库（货流回玩具厂手里，跟"发料"方向相反）
   | "material_issuance" // 代工厂物料发放：我发的物料流进代工厂 → 入库
   | "oem_receipt" // 代工厂成品回收：代工厂交回成品/半成品，流出代工厂 → 出库
   | "common_material_return"; // 代工厂通用物料回收（框等），流出代工厂 → 出库

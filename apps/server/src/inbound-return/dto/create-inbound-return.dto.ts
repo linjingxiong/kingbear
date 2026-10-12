@@ -2,8 +2,8 @@ import { IsArray, IsBoolean, IsDateString, IsIn, IsMongoId, IsNumber, IsOptional
 
 export class CreateInboundReturnDto {
   @IsOptional()
-  @IsIn(['issue', 'return'])
-  kind?: 'issue' | 'return';
+  @IsIn(['issue', 'return', 'materialReturn'])
+  kind?: 'issue' | 'return' | 'materialReturn';
 
   @IsMongoId()
   factoryId: string;
@@ -12,7 +12,7 @@ export class CreateInboundReturnDto {
   @IsMongoId()
   productId?: string | null;
 
-  // 退货必填（货号），发料不填（原材料没有货号，用 materialName）
+  // 退货必填（货号），发料/退料不填（原材料没有货号，用 materialName）
   @IsOptional()
   @IsString()
   sku?: string;
@@ -21,12 +21,12 @@ export class CreateInboundReturnDto {
   @IsString()
   name?: string;
 
-  // 发料必填（物料名称），退货不填
+  // 发料/退料必填（物料名称），退货不填
   @IsOptional()
   @IsString()
   materialName?: string;
 
-  // 发料选填：这批料是哪个产品用的
+  // 发料/退料选填：这批料是哪个产品用的
   @IsOptional()
   @IsMongoId()
   productGroupId?: string | null;
