@@ -620,6 +620,14 @@ async function restoreDraft() {
     // 这份草稿是改用 IndexedDB 存文件之前存下的老草稿，或者浏览器清过缓存）就是 null，
     // 跟"文件已丢失"那套提示自然衔接上，不用额外判断
     pendingIssueFiles.value = await loadPendingFiles(imageUrls.length);
+    // 跨刷新/关闭页面之后，原来的 blob: 预览地址肯定已经失效了（浏览器的规定，创建这个
+    // 地址的页面一卸载，这个地址就永久失效，不是想不想撤销的问题）——这张图的原始文件
+    // 要是从 IndexedDB 读回来了，这里就地重新生成一个新的 blob: 预览地址，缩略图能正常
+    // 显示，不用非得点了"校对"识别完才看得到图
+    imageUrls.forEach((url, idx) => {
+      const file = pendingIssueFiles.value[idx];
+      if (url?.startsWith("blob:") && file) imageUrls[idx] = URL.createObjectURL(file);
+    });
     // 多图批次现在是点开"校对"才逐张识别，草稿存下的时候完全可能一行都还没识别出来
     // （比如刚导入就退出了）——这种情况下 d.rows 是空的很正常，不该硬塞一行假的"手动新增"
     // 行进去（那样这张图反而没法再正常走"校对"识别了）。只有单张图（原来就是"识别完直接
