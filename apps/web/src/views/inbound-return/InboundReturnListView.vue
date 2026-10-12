@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import dayjs from "dayjs";
 import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions } from "element-plus";
 import {
@@ -386,7 +386,17 @@ async function submitGroupRows(group: RenderGroup): Promise<boolean> {
         remark: form.remark,
         images,
       };
-      await submitWithDuplicateConfirm(dto, createInboundReturn);
+      try {
+        await submitWithDuplicateConfirm(dto, createInboundReturn);
+      } catch (err) {
+        // 弹出"疑似重复"被取消（点了"返回检查"），或者接口本身报错——这里必须接住，
+        // 不然这个异常会一路往上抛，调用方 submitCurrentGroup 里"标已校对""清草稿"
+        // 这些后续步骤全部不会执行，组里明明已经有几行真保存成功了，总览列表却一直
+        // 卡在"未校对"、草稿banner也一直甩不掉，看着就像没保存，其实保存了一半
+        console.error("[出库单] 这一行保存失败", err);
+        ElMessage.warning("这一行没保存成功（可能是取消了疑似重复提示，或者接口报错）。前面已经保存的行不会丢，这一行和后面还没提交的留在这一组里，改好再点一次「校对完成并保存」");
+        return false;
+      }
       // 这一行一提交成功就立刻从表单里摘掉，不等整组都提交完再一起摘——不然万一组里
       // 后面某一行提交时弹出"疑似重复"被取消、抛出异常，前面已经真正存进数据库的行
       // 会因为还留在表单里，下次重试这一组又被重复提交一遍。按对象本身摘不按下标，
@@ -414,7 +424,10 @@ async function submitCurrentGroup() {
   if (remaining === 0) {
     // 全部校对完了，form 里还留着玩具厂/日期/图片这些字段（没清空），要是不主动清掉草稿，
     // 自动保存那一下会把这个"看着像没录完、其实已经全部存完了"的状态又写回草稿里，关闭
-    // 弹窗之后列表页还是会冒出"有张没录完的草稿"这种让人摸不着头脑的提示
+    // 弹窗之后列表页还是会冒出"有张没录完的草稿"这种让人摸不着头脑的提示。
+    // 提交最后一行时改的 form.rows 可能还有一次自动保存排在队列里没真正跑完——先等一拍
+    // （nextTick）让它跑完，再清草稿，不然清完又被这次"迟到"的自动保存重新写回去，等于白清
+    await nextTick();
     clearDraft();
   }
   ElMessage.success(remaining === 0 ? "全部校对完成，可以点下面「关闭」了" : `已保存，返回列表（还剩 ${remaining} 张未校对）`);
