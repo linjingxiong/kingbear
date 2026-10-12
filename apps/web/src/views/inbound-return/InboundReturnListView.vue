@@ -1095,7 +1095,9 @@ onMounted(async () => {
               <el-table-column label="待处理行数" width="110" align="center">
                 <template #default="{ row: g }">
                   <span v-if="g.imageIdx != null && recognizingImageIdxs.has(g.imageIdx)" class="muted">识别中…</span>
-                  <span v-else-if="g.imageIdx != null && g.rows.length === 0 && !recognizedOnceIdxs.has(g.imageIdx)" class="muted"
+                  <span
+                    v-else-if="g.imageIdx != null && g.rows.length === 0 && !recognizedOnceIdxs.has(g.imageIdx) && !completedGroupKeys.has(groupKey(g))"
+                    class="muted"
                     >待识别</span
                   >
                   <span v-else>{{ g.rows.length }}</span>
