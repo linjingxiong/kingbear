@@ -334,7 +334,8 @@ async function recognizeGroupImage(imageIdx: number) {
     }
     pendingIssueFiles.value[imageIdx] = null;
     void deletePendingFile(imageIdx);
-  } catch {
+  } catch (err) {
+    console.error("[出库单] 第", imageIdx, "张图识别失败", err);
     ElMessage.error("这张图识别失败，再点一次「校对」重试");
   } finally {
     recognizingImageIdxs.value.delete(imageIdx);
@@ -352,6 +353,7 @@ async function reviewGroup(key: string) {
   } else {
     // 页面刷新或者恢复草稿之后，原始文件对象留不住（没法存进 localStorage），没法重新
     // 自动识别——图还在（缩略图能看），只是没法再点一下就自动识别了，讲清楚免得以为卡住了
+    console.warn("[出库单] 第", g.imageIdx, "张图没有可用的原始文件（IndexedDB 里也没读到），跳过自动识别");
     ElMessage.warning('这张图的原始文件已经丢失（刷新页面/恢复草稿后找不到了），没法自动识别。可以对着上面的原图手动点"+ 添加一行"补，或者去工具栏重新导入这一张');
   }
 }
@@ -501,9 +503,11 @@ async function savePendingFiles(files: File[]) {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
-  } catch {
+  } catch (err) {
     // 存不进去（比如隐私模式/浏览器不支持）就算了，退出去再恢复那几张没点过"校对"的图
-    // 就没法自动识别了，不影响当场这一批照常用
+    // 就没法自动识别了，不影响当场这一批照常用——但打一条 console.error，不然这种情况
+    // 用户这边完全看不出哪里出了问题，连反馈都没法反馈
+    console.error("[出库单] 原始文件存 IndexedDB 失败", err);
   }
 }
 async function loadPendingFiles(count: number): Promise<(File | null)[]> {
@@ -516,13 +520,17 @@ async function loadPendingFiles(count: number): Promise<(File | null)[]> {
         return new Promise<File | null>((resolve) => {
           const req = store.get(idx);
           req.onsuccess = () => resolve((req.result as File) ?? null);
-          req.onerror = () => resolve(null);
+          req.onerror = () => {
+            console.error("[出库单] 从 IndexedDB 读第", idx, "张图的原始文件失败", req.error);
+            resolve(null);
+          };
         });
       }),
     );
     db.close();
     return result;
-  } catch {
+  } catch (err) {
+    console.error("[出库单] 从 IndexedDB 读原始文件失败", err);
     return Array.from({ length: count }, () => null);
   }
 }
