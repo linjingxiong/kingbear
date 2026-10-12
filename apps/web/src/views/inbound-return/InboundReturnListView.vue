@@ -411,6 +411,12 @@ async function submitCurrentGroup() {
   load();
   activeGroupKey.value = null;
   const remaining = listGroups.value.length - completedCount.value;
+  if (remaining === 0) {
+    // 全部校对完了，form 里还留着玩具厂/日期/图片这些字段（没清空），要是不主动清掉草稿，
+    // 自动保存那一下会把这个"看着像没录完、其实已经全部存完了"的状态又写回草稿里，关闭
+    // 弹窗之后列表页还是会冒出"有张没录完的草稿"这种让人摸不着头脑的提示
+    clearDraft();
+  }
   ElMessage.success(remaining === 0 ? "全部校对完成，可以点下面「关闭」了" : `已保存，返回列表（还剩 ${remaining} 张未校对）`);
 }
 
