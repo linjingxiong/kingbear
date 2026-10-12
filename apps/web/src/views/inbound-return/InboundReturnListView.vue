@@ -436,12 +436,22 @@ async function submitCurrentGroup() {
 // 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
 function onRowProductGroupChange(row: RowItem) {
   row.materialName = "";
-  // 一批发料大多数是同一个产品，记住这次选的，后面新增的行直接带上、不用每行重选；
-  // 顺手把这一批里还没选产品的其他行也一起填上（比如拍照识别一次性出来一堆空产品的行），
-  // 已经手动选过别的产品的行不动，不会覆盖掉手动选择
+  // 一批发料大多数是同一个产品，记住这次选的，后面新增的行/新识别出来的组直接带上、
+  // 不用每行重选
   lastIssueProductGroupId.value = row.productGroupId;
   for (const r of form.rows) {
-    if (r !== row && r.kind === "issue" && !r.productGroupId) r.productGroupId = row.productGroupId;
+    if (r === row || r.kind !== "issue") continue;
+    if (r.sourceImageIdx === row.sourceImageIdx) {
+      // 同一张图识别出来的这一组，点了这一组里某一行的产品，这一组其余行都跟着换成
+      // 一样的——不管这些行原来是空的，还是识别的时候已经顺手带上了别的产品（比如带的
+      // 是上一组的产品），同一组内都以这一次选的为准，一组收的料基本都是同一个产品，
+      // 不用每一行都重选一遍
+      r.productGroupId = row.productGroupId;
+    } else if (!r.productGroupId) {
+      // 别的组（别的图）的行只在原来是空的时候才顺手带一下；已经是别的产品说明是那组
+      // 自己选定的，不会被这里跟着改掉
+      r.productGroupId = row.productGroupId;
+    }
   }
 }
 
