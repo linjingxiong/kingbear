@@ -29,6 +29,21 @@ export function recognizeOutboundIssue(file: File) {
   });
 }
 
+/** 发料单图片先只上传、暂不识别——"校对工作台"一次选好几张图时用，图先存到服务器上
+ * （不怕关浏览器/刷新页面丢文件），点哪张的"校对"再识别哪张 */
+export function uploadIssueImage(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return request.post<never, { url: string }>("/inbound-returns/upload-issue-image", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+}
+
+/** 识别一张已经用 uploadIssueImage 传过的发料单图片，按 url 直接识别，不用再重新上传一遍 */
+export function recognizeOutboundIssueByUrl(url: string) {
+  return request.post<never, OutboundIssueOcrResult>("/inbound-returns/recognize-issue-by-url", { url });
+}
+
 export function createInboundReturn(dto: CreateInboundReturnDto) {
   return request.post<never, InboundReturnListItem>("/inbound-returns", dto);
 }

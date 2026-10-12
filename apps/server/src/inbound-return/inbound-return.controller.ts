@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { InboundReturnService } from './inbound-return.service';
 import { CreateInboundReturnDto } from './dto/create-inbound-return.dto';
 import { UpdateInboundReturnDto } from './dto/update-inbound-return.dto';
-import { inboundReturnImageMulterOptions, toPublicUploadUrl } from '../upload/upload.config';
+import { inboundReturnImageMulterOptions, toDiskPath, toPublicUploadUrl } from '../upload/upload.config';
 
 @Controller('inbound-returns')
 export class InboundReturnController {
@@ -33,6 +33,23 @@ export class InboundReturnController {
     const imageUrl = toPublicUploadUrl(this.uploadDir, file.path);
     const ocr = await this.returnService.recognizeIssue(file.path);
     return { imageUrl, ...ocr };
+  }
+
+  /** 发料单图片先只上传、暂不识别——"校对工作台"一次选好几张图时用，先把图存到服务器上
+   * （不受浏览器关闭/刷新影响），点哪一张的"校对"再识别哪一张，不用等全部图都识别完才能看 */
+  @Post('upload-issue-image')
+  @UseInterceptors(FileInterceptor('file', inboundReturnImageMulterOptions(process.env.UPLOAD_DIR ?? 'uploads')))
+  uploadIssueImage(@UploadedFile() file: Express.Multer.File) {
+    return { url: toPublicUploadUrl(this.uploadDir, file.path) };
+  }
+
+  /** 识别一张已经用 upload-issue-image 传过的发料单图片，按 url 直接找磁盘上的文件，
+   * 不用再重新上传一遍 */
+  @Post('recognize-issue-by-url')
+  async recognizeIssueByUrl(@Body('url') url: string) {
+    const imagePath = toDiskPath(this.uploadDir, url);
+    const ocr = await this.returnService.recognizeIssue(imagePath);
+    return { imageUrl: url, ...ocr };
   }
 
   @Post()

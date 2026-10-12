@@ -22,7 +22,9 @@ import {
   listInboundReturns,
   recognizeInboundReturn,
   recognizeOutboundIssue,
+  recognizeOutboundIssueByUrl,
   updateInboundReturn,
+  uploadIssueImage,
 } from "../../api/inbound-return";
 import { useImageZoomPan } from "../../composables/useImageZoomPan";
 
@@ -313,15 +315,15 @@ const groupsToShow = computed(() => (isMultiImageBatch.value ? (activeGroup.valu
  * 一次选的产品（跟手动加行、单张图识别是同一个"沿用上次选的产品"的习惯）。识别到玩具厂/
  * 日期这两项只在当前还没填的时候才顺手填上，不会覆盖掉已经选好的（多张图是一张一张分开
  * 识别的，不能像以前"只认第一张"那样简单处理，后识别的几张就不要瞎改已经定下来的玩具厂了 */
+/** 这张图在导入的时候已经传到服务器了（见 importIssueFilesLazy），这里直接按 url 识别，
+ * 不用再重新上传一遍文件——也因为这样，不管关没关过浏览器、刷没刷新过页面，这张图都还在
+ * 服务器上，随时能点"校对"识别，不存在"原始文件丢了没法识别"这回事 */
 async function recognizeGroupImage(imageIdx: number) {
-  const file = pendingIssueFiles.value[imageIdx];
-  if (!file || recognizingImageIdxs.value.has(imageIdx)) return;
+  if (recognizingImageIdxs.value.has(imageIdx)) return;
   recognizingImageIdxs.value.add(imageIdx);
+  recognizedOnceIdxs.value.add(imageIdx);
   try {
-    const r = await recognizeOutboundIssue(file);
-    const oldUrl = form.imageUrls[imageIdx];
-    form.imageUrls[imageIdx] = r.imageUrl;
-    if (oldUrl?.startsWith("blob:")) URL.revokeObjectURL(oldUrl);
+    const r = await recognizeOutboundIssueByUrl(form.imageUrls[imageIdx]);
     if (!form.returnDate && r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
     for (const it of r.items) {
       form.rows.push({
@@ -332,30 +334,23 @@ async function recognizeGroupImage(imageIdx: number) {
         sourceImageIdx: imageIdx,
       });
     }
-    pendingIssueFiles.value[imageIdx] = null;
-    void deletePendingFile(imageIdx);
   } catch (err) {
     console.error("[出库单] 第", imageIdx, "张图识别失败", err);
+    recognizedOnceIdxs.value.delete(imageIdx); // 识别失败不算"试过了"，再点一次"校对"还能重试
     ElMessage.error("这张图识别失败，再点一次「校对」重试");
   } finally {
     recognizingImageIdxs.value.delete(imageIdx);
   }
 }
 
-/** 点总览列表某一行的"校对"：先切到详情区，这一组要是还没识别过（有原始文件但还没出过
- * 行），顺手就在这里把识别也做了——不用先识别完所有图才能点进来看 */
+/** 点总览列表某一行的"校对"：先切到详情区，这一组要是还没识别过（这一次打开弹窗期间
+ * 还没试过），顺手就在这里把识别也做了——不用先识别完所有图才能点进来看。已经试过一次
+ * 的（不管是识别出了几行还是确实没识别出东西）不会重复调接口，省得每次点进来都重新识别 */
 async function reviewGroup(key: string) {
   activeGroupKey.value = key;
   const g = listGroups.value.find((x) => groupKey(x) === key);
-  if (g?.imageIdx == null || g.rows.length > 0) return;
-  if (pendingIssueFiles.value[g.imageIdx]) {
-    await recognizeGroupImage(g.imageIdx);
-  } else {
-    // 页面刷新或者恢复草稿之后，原始文件对象留不住（没法存进 localStorage），没法重新
-    // 自动识别——图还在（缩略图能看），只是没法再点一下就自动识别了，讲清楚免得以为卡住了
-    console.warn("[出库单] 第", g.imageIdx, "张图没有可用的原始文件（IndexedDB 里也没读到），跳过自动识别");
-    ElMessage.warning('这张图的原始文件已经丢失（刷新页面/恢复草稿后找不到了），没法自动识别。可以对着上面的原图手动点"+ 添加一行"补，或者去工具栏重新导入这一张');
-  }
+  if (g?.imageIdx == null || g.rows.length > 0 || recognizedOnceIdxs.value.has(g.imageIdx)) return;
+  await recognizeGroupImage(g.imageIdx);
 }
 function backToList() {
   activeGroupKey.value = null;
@@ -453,16 +448,13 @@ const uploading = ref(false);
 // 不用同一个产品在每一行都重选一遍；每次重新开一张新出库单（resetForm）就清空，不会带到下一张单上
 const lastIssueProductGroupId = ref("");
 // 多张图导入时不再一次性把 N 张图全部识别完才打开弹窗（图一多，等全部识别完太慢）——
-// 先把原始文件存一份，点开总览列表里某一组的"校对"才真正识别那一张。下标跟
-// form.imageUrls 对齐；识别完或者没有对应文件（比如草稿恢复后文件对象丢了，没法重新
-// 识别）就是 null/undefined
-const pendingIssueFiles = ref<(File | null)[]>([]);
+// 选完图立刻把每张图传到服务器（不识别），点开总览列表里某一组的"校对"才真正识别那一张
 /** 正在识别哪几张图（下标集合），详情区显示"识别中…"，不是永久的空行编辑区——用集合不用
  * 单个值，是因为允许同时识别好几张（先点了 A 还没识别完又点了 B，两边各识别各的，互不耽误） */
 const recognizingImageIdxs = ref<Set<number>>(new Set());
-/** 这次打开弹窗是不是从草稿恢复出来的——草稿恢复不出原始文件，总览列表里"0 行"跟"这张图
- * 原始文件已经丢了、没法再自动识别"要分开显示，不然看着像没识别出东西，其实是没法识别了 */
-const restoredFromDraft = ref(false);
+/** 这一次打开弹窗期间，哪几张图已经试过识别了（不管识别出了几行）——避免反复点进同一个
+ * "识别完发现是空的"的组，每次都重新调一遍识别接口 */
+const recognizedOnceIdxs = ref<Set<number>>(new Set());
 
 const rules = {
   factoryId: [{ required: true, message: "请选择玩具厂", trigger: "change" }],
@@ -476,84 +468,6 @@ const DRAFT_KEY = "kingbear-inbound-return-draft";
 // 是直接拿整个 form 对象序列化的，混进去还得多一层兼容老草稿的逻辑，不如单独一个 key 简单
 const REVIEWED_KEY = "kingbear-inbound-return-draft-reviewed";
 const draftAvailable = ref(false);
-
-/* ---------- 多图批次还没识别的原始文件：localStorage 存不了 File，这几张图存 IndexedDB
-   里——这样退出弹窗（甚至刷新页面）之后点"恢复"，没点过"校对"的那几张图还能接着自动识别，
-   不是只能干看着图自己手动抄。按图片下标存，哪张图都是开新一批（importIssueFilesLazy）
-   先清空、再逐张存进去；识别完或者彻底放弃这批草稿，对应那条/整批就从 IndexedDB 里删掉，
-   不会无限攒下去。任何一步失败（比如浏览器禁用了 IndexedDB）都只是退化成"这张图没法重新
-   识别"，不影响表单本身的功能 ---------- */
-const PENDING_FILES_DB = "kingbear-inbound-return-files";
-function openPendingFilesDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(PENDING_FILES_DB, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore("files");
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-async function savePendingFiles(files: File[]) {
-  try {
-    const db = await openPendingFilesDb();
-    const tx = db.transaction("files", "readwrite");
-    tx.objectStore("files").clear();
-    files.forEach((f, idx) => tx.objectStore("files").put(f, idx));
-    await new Promise((resolve, reject) => {
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-  } catch (err) {
-    // 存不进去（比如隐私模式/浏览器不支持）就算了，退出去再恢复那几张没点过"校对"的图
-    // 就没法自动识别了，不影响当场这一批照常用——但打一条 console.error，不然这种情况
-    // 用户这边完全看不出哪里出了问题，连反馈都没法反馈
-    console.error("[出库单] 原始文件存 IndexedDB 失败", err);
-  }
-}
-async function loadPendingFiles(count: number): Promise<(File | null)[]> {
-  try {
-    const db = await openPendingFilesDb();
-    const tx = db.transaction("files", "readonly");
-    const store = tx.objectStore("files");
-    const result = await Promise.all(
-      Array.from({ length: count }, (_, idx) => {
-        return new Promise<File | null>((resolve) => {
-          const req = store.get(idx);
-          req.onsuccess = () => resolve((req.result as File) ?? null);
-          req.onerror = () => {
-            console.error("[出库单] 从 IndexedDB 读第", idx, "张图的原始文件失败", req.error);
-            resolve(null);
-          };
-        });
-      }),
-    );
-    db.close();
-    return result;
-  } catch (err) {
-    console.error("[出库单] 从 IndexedDB 读原始文件失败", err);
-    return Array.from({ length: count }, () => null);
-  }
-}
-async function deletePendingFile(idx: number) {
-  try {
-    const db = await openPendingFilesDb();
-    const tx = db.transaction("files", "readwrite");
-    tx.objectStore("files").delete(idx);
-    db.close();
-  } catch {
-    /* ignore */
-  }
-}
-async function clearPendingFiles() {
-  try {
-    const db = await openPendingFilesDb();
-    const tx = db.transaction("files", "readwrite");
-    tx.objectStore("files").clear();
-    db.close();
-  } catch {
-    /* ignore */
-  }
-}
 
 function formHasContent() {
   return !!(
@@ -591,7 +505,6 @@ function clearDraft() {
   } catch {
     /* ignore */
   }
-  void clearPendingFiles();
   draftAvailable.value = false;
 }
 function checkDraft() {
@@ -609,25 +522,11 @@ async function restoreDraft() {
     dialogMode.value = "create";
     editingId.value = null;
     if (d.factoryId) await loadProducts(d.factoryId);
-    // 老的 blob: 预览地址（没识别完就退出攒下的）放掉，反正重新打开页面它们本来就已经
-    // 失效了，留着也没用——原始文件对象本身另外存在 IndexedDB 里，不受这个影响
-    for (const url of form.imageUrls) {
-      if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-    }
     recognizingImageIdxs.value = new Set();
+    recognizedOnceIdxs.value = new Set();
+    // 图片现在导入的时候就直接传到服务器了（不是本地临时预览），存的是真实 URL，
+    // 不怕刷新页面/关浏览器，缩略图、点"校对"识别都能照常用，不用额外处理
     const imageUrls: string[] = Array.isArray(d.imageUrls) ? d.imageUrls : d.imageUrl ? [d.imageUrl] : [];
-    // 没点过"校对"的那几张图，原始文件存在 IndexedDB 里，这里尽量读回来——读不到（比如
-    // 这份草稿是改用 IndexedDB 存文件之前存下的老草稿，或者浏览器清过缓存）就是 null，
-    // 跟"文件已丢失"那套提示自然衔接上，不用额外判断
-    pendingIssueFiles.value = await loadPendingFiles(imageUrls.length);
-    // 跨刷新/关闭页面之后，原来的 blob: 预览地址肯定已经失效了（浏览器的规定，创建这个
-    // 地址的页面一卸载，这个地址就永久失效，不是想不想撤销的问题）——这张图的原始文件
-    // 要是从 IndexedDB 读回来了，这里就地重新生成一个新的 blob: 预览地址，缩略图能正常
-    // 显示，不用非得点了"校对"识别完才看得到图
-    imageUrls.forEach((url, idx) => {
-      const file = pendingIssueFiles.value[idx];
-      if (url?.startsWith("blob:") && file) imageUrls[idx] = URL.createObjectURL(file);
-    });
     // 多图批次现在是点开"校对"才逐张识别，草稿存下的时候完全可能一行都还没识别出来
     // （比如刚导入就退出了）——这种情况下 d.rows 是空的很正常，不该硬塞一行假的"手动新增"
     // 行进去（那样这张图反而没法再正常走"校对"识别了）。只有单张图（原来就是"识别完直接
@@ -655,7 +554,6 @@ async function restoreDraft() {
     // 置空，永远先停在总览列表，不会停在恢复前关闭弹窗那一刻碰巧停留的某一组详情页上
     isMultiImageBatch.value = imageUrls.length > 1;
     activeGroupKey.value = null;
-    restoredFromDraft.value = true;
     try {
       const reviewedRaw = localStorage.getItem(REVIEWED_KEY);
       completedGroupKeys.value = new Set(reviewedRaw ? JSON.parse(reviewedRaw) : []);
@@ -688,11 +586,6 @@ watch(dialogVisible, (open) => {
 });
 
 function resetForm() {
-  // 还没来得及识别的图，本地预览用的是 blob: 临时地址，不收尾的话每次开新单子都会攒一批
-  // 没释放的内存
-  for (const url of form.imageUrls) {
-    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-  }
   Object.assign(form, {
     factoryId: "",
     returnDate: "",
@@ -704,13 +597,8 @@ function resetForm() {
   isMultiImageBatch.value = false;
   activeGroupKey.value = null;
   completedGroupKeys.value = new Set();
-  pendingIssueFiles.value = [];
   recognizingImageIdxs.value = new Set();
-  restoredFromDraft.value = false;
-  // 这里不清 IndexedDB 里存的原始文件：如果是开一批新的多图导入，紧接着
-  // importIssueFilesLazy 会自己存新文件进去、顺带把旧的清掉（见 savePendingFiles）；
-  // 如果只是单纯关掉弹窗、草稿还留着没丢弃，那几张没点过"校对"的图就应该继续留着，
-  // 不然"恢复"出来又要退化成没法自动识别了
+  recognizedOnceIdxs.value = new Set();
 }
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
@@ -740,13 +628,8 @@ async function openEdit(row: InboundReturnListItem) {
   isMultiImageBatch.value = false;
   activeGroupKey.value = null;
   completedGroupKeys.value = new Set();
-  // 万一上一次开的是个多图导入、还有没识别的图就被晾在那没关，这里顺手收尾一下
-  for (const url of form.imageUrls) {
-    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
-  }
-  pendingIssueFiles.value = [];
   recognizingImageIdxs.value = new Set();
-  restoredFromDraft.value = false;
+  recognizedOnceIdxs.value = new Set();
   await Promise.all([loadProducts(row.factoryId), loadProductGroups(row.factoryId)]);
   Object.assign(form, {
     factoryId: row.factoryId,
@@ -921,16 +804,20 @@ async function importIssueFilesLazy(files: File[]) {
   resetForm();
   await applyDefaultFactory();
 
-  form.imageUrls = files.map((f) => URL.createObjectURL(f));
-  pendingIssueFiles.value = [...files];
-  form.rows = [];
-  isMultiImageBatch.value = true;
-  // 顺手把原始文件存进 IndexedDB——退出弹窗（甚至刷新页面）之后点"恢复"，没点过"校对"
-  // 的那几张图还能接着自动识别，不是只能对着图自己手抄
-  await savePendingFiles(files);
+  uploading.value = true;
+  try {
+    // 先把每张图都传到服务器（只存文件，不识别）——图存在服务器上不怕关浏览器/刷新页面，
+    // 点哪张的"校对"再识别哪张，不用等全部图传完识别完才能看
+    const uploaded = await Promise.all(files.map((f) => uploadIssueImage(f)));
+    form.imageUrls = uploaded.map((r) => r.url);
+    form.rows = [];
+    isMultiImageBatch.value = true;
 
-  dialogVisible.value = true;
-  ElMessage.success(`已导入 ${files.length} 张图，点每一行的"校对"再逐张识别，不用等全部识别完才能看`);
+    dialogVisible.value = true;
+    ElMessage.success(`已导入 ${files.length} 张图，点每一行的"校对"再逐张识别，不用等全部识别完才能看`);
+  } finally {
+    uploading.value = false;
+  }
 }
 
 // 退货要选好货号、填重量；发料要填物料名称、填重量——两套字段各自的必填条件不一样
@@ -1202,12 +1089,8 @@ onMounted(async () => {
               <el-table-column label="待处理行数" width="110" align="center">
                 <template #default="{ row: g }">
                   <span v-if="g.imageIdx != null && recognizingImageIdxs.has(g.imageIdx)" class="muted">识别中…</span>
-                  <span v-else-if="g.imageIdx != null && pendingIssueFiles[g.imageIdx]" class="muted">待识别</span>
-                  <span
-                    v-else-if="g.imageIdx != null && g.rows.length === 0 && restoredFromDraft"
-                    class="muted"
-                    title="刷新页面/恢复草稿之后，这张图的原始文件对象留不住，没法重新自动识别"
-                    >文件已丢失</span
+                  <span v-else-if="g.imageIdx != null && g.rows.length === 0 && !recognizedOnceIdxs.has(g.imageIdx)" class="muted"
+                    >待识别</span
                   >
                   <span v-else>{{ g.rows.length }}</span>
                 </template>
