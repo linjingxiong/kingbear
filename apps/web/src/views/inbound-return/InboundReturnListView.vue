@@ -309,8 +309,45 @@ const activeGroup = computed<RenderGroup | undefined>(() =>
 // 是多图批次：总览列表时这里不显示，点进某一组之后只显示这一组
 const groupsToShow = computed(() => (isMultiImageBatch.value ? (activeGroup.value ? [activeGroup.value] : []) : renderGroups.value));
 
-function openGroupDetail(key: string) {
+/** 识别这一张图（下标 imageIdx），识别出来的行打上这张图的 sourceImageIdx、带上这批最近
+ * 一次选的产品（跟手动加行、单张图识别是同一个"沿用上次选的产品"的习惯）。识别到玩具厂/
+ * 日期这两项只在当前还没填的时候才顺手填上，不会覆盖掉已经选好的（多张图是一张一张分开
+ * 识别的，不能像以前"只认第一张"那样简单处理，后识别的几张就不要瞎改已经定下来的玩具厂了 */
+async function recognizeGroupImage(imageIdx: number) {
+  const file = pendingIssueFiles.value[imageIdx];
+  if (!file || recognizingImageIdxs.value.has(imageIdx)) return;
+  recognizingImageIdxs.value.add(imageIdx);
+  try {
+    const r = await recognizeOutboundIssue(file);
+    const oldUrl = form.imageUrls[imageIdx];
+    form.imageUrls[imageIdx] = r.imageUrl;
+    if (oldUrl?.startsWith("blob:")) URL.revokeObjectURL(oldUrl);
+    if (!form.returnDate && r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
+    for (const it of r.items) {
+      form.rows.push({
+        ...blankRow("issue"),
+        materialName: it.materialName,
+        weightJin: it.weightJin,
+        productGroupId: lastIssueProductGroupId.value,
+        sourceImageIdx: imageIdx,
+      });
+    }
+    pendingIssueFiles.value[imageIdx] = null;
+  } catch {
+    ElMessage.error("这张图识别失败，再点一次「校对」重试");
+  } finally {
+    recognizingImageIdxs.value.delete(imageIdx);
+  }
+}
+
+/** 点总览列表某一行的"校对"：先切到详情区，这一组要是还没识别过（有原始文件但还没出过
+ * 行），顺手就在这里把识别也做了——不用先识别完所有图才能点进来看 */
+async function reviewGroup(key: string) {
   activeGroupKey.value = key;
+  const g = listGroups.value.find((x) => groupKey(x) === key);
+  if (g?.imageIdx != null && g.rows.length === 0 && pendingIssueFiles.value[g.imageIdx]) {
+    await recognizeGroupImage(g.imageIdx);
+  }
 }
 function backToList() {
   activeGroupKey.value = null;
@@ -407,6 +444,14 @@ const uploading = ref(false);
 // 记着这批发料最近一次选的产品，新增行、批量识别出来的空产品行都直接带上这个默认值——
 // 不用同一个产品在每一行都重选一遍；每次重新开一张新出库单（resetForm）就清空，不会带到下一张单上
 const lastIssueProductGroupId = ref("");
+// 多张图导入时不再一次性把 N 张图全部识别完才打开弹窗（图一多，等全部识别完太慢）——
+// 先把原始文件存一份，点开总览列表里某一组的"校对"才真正识别那一张。下标跟
+// form.imageUrls 对齐；识别完或者没有对应文件（比如草稿恢复后文件对象丢了，没法重新
+// 识别）就是 null/undefined
+const pendingIssueFiles = ref<(File | null)[]>([]);
+/** 正在识别哪几张图（下标集合），详情区显示"识别中…"，不是永久的空行编辑区——用集合不用
+ * 单个值，是因为允许同时识别好几张（先点了 A 还没识别完又点了 B，两边各识别各的，互不耽误） */
+const recognizingImageIdxs = ref<Set<number>>(new Set());
 
 const rules = {
   factoryId: [{ required: true, message: "请选择玩具厂", trigger: "change" }],
@@ -474,6 +519,14 @@ async function restoreDraft() {
     dialogMode.value = "create";
     editingId.value = null;
     if (d.factoryId) await loadProducts(d.factoryId);
+    // 原始文件对象存不进 localStorage，草稿里不管存的是哪张图，这里都没法重新识别了——
+    // 清空候选文件列表；老的 blob: 预览地址（没识别完就退出攒下的）也一并放掉，反正重新
+    // 打开页面它们本来就已经失效了，留着也没用
+    for (const url of form.imageUrls) {
+      if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+    }
+    pendingIssueFiles.value = [];
+    recognizingImageIdxs.value = new Set();
     const imageUrls: string[] = Array.isArray(d.imageUrls) ? d.imageUrls : d.imageUrl ? [d.imageUrl] : [];
     Object.assign(form, {
       factoryId: d.factoryId ?? "",
@@ -524,6 +577,11 @@ watch(dialogVisible, (open) => {
 });
 
 function resetForm() {
+  // 还没来得及识别的图，本地预览用的是 blob: 临时地址，不收尾的话每次开新单子都会攒一批
+  // 没释放的内存
+  for (const url of form.imageUrls) {
+    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+  }
   Object.assign(form, {
     factoryId: "",
     returnDate: "",
@@ -535,6 +593,8 @@ function resetForm() {
   isMultiImageBatch.value = false;
   activeGroupKey.value = null;
   completedGroupKeys.value = new Set();
+  pendingIssueFiles.value = [];
+  recognizingImageIdxs.value = new Set();
 }
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
@@ -564,6 +624,12 @@ async function openEdit(row: InboundReturnListItem) {
   isMultiImageBatch.value = false;
   activeGroupKey.value = null;
   completedGroupKeys.value = new Set();
+  // 万一上一次开的是个多图导入、还有没识别的图就被晾在那没关，这里顺手收尾一下
+  for (const url of form.imageUrls) {
+    if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+  }
+  pendingIssueFiles.value = [];
+  recognizingImageIdxs.value = new Set();
   await Promise.all([loadProducts(row.factoryId), loadProductGroups(row.factoryId)]);
   Object.assign(form, {
     factoryId: row.factoryId,
@@ -677,56 +743,74 @@ async function onIssueFilesSelected(e: Event) {
   if (files.length) await importIssueFiles(files);
 }
 
-// 拍照识别·发料：一张出库单纸写得多，经常要拍好几张才拍全，支持一次选多张图——逐张识别，
-// 识别出来的行全部合并进同一张表；玩具厂/日期只认第一张识别出来的（几张图本来就是同一张单）
+// 拍照识别·发料：一张出库单纸写得多，经常要拍好几张才拍全，支持一次选多张图。多张图是
+// 点开"校对"才逐张识别（见 recognizeGroupImage），不再是导入时一次性识别完，玩具厂没法
+// 像以前那样"认第一张识别出来的"，干脆跟列表页筛选同一个习惯，先按惯例默认选"美奇"，
+// 找不到这个厂就算了，不会白屏
+async function applyDefaultFactory() {
+  const preferred = factories.value.find((f) => f.name === "美奇");
+  if (preferred) {
+    form.factoryId = preferred.id;
+    await Promise.all([loadProducts(preferred.id), loadProductGroups(preferred.id)]);
+  }
+}
+
 async function importIssueFiles(files: File[]) {
+  if (files.length > 1) {
+    await importIssueFilesLazy(files);
+    return;
+  }
+  // 只选了一张图，跟原来一样选完立刻识别、直接进详情，不用绕"校对工作台"那一圈
   uploading.value = true;
   try {
     dialogMode.value = "create";
     editingId.value = null;
     resetForm();
+    await applyDefaultFactory();
 
-    const imageUrls: string[] = [];
-    const rows: RowItem[] = [];
-    let headerFilled = false;
-    for (const [idx, file] of files.entries()) {
-      const r = await recognizeOutboundIssue(file);
-      imageUrls.push(r.imageUrl);
-      if (!headerFilled) {
-        if (r.factoryName) {
-          const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
-          // 发料行不用选货号，这里仍然拉一下这个厂的产品列表——万一某一行手动改成"退货"，
-          // 货号下拉能马上有选项，不用等用户重新碰一下玩具厂选择框才触发加载。产品清单也一起拉，
-          // 方便识别完之后逐行补选"这批料是哪个产品的"
-          if (f) {
-            form.factoryId = f.id;
-            await Promise.all([loadProducts(f.id), loadProductGroups(f.id)]);
-          }
-        }
-        if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
-        headerFilled = true;
-      }
-      // 打上这一行是第几张图识别出来的，界面上才能把这张图跟它识别出来的行摆在一起，
-      // 不是所有图识别出来的行混成一张大表
-      for (const it of r.items) {
-        rows.push({ ...blankRow("issue"), materialName: it.materialName, weightJin: it.weightJin, sourceImageIdx: idx });
+    const file = files[0];
+    const r = await recognizeOutboundIssue(file);
+    form.imageUrls = [r.imageUrl];
+    if (r.factoryName) {
+      const f = factories.value.find((x) => x.name === r.factoryName || x.name.includes(r.factoryName!));
+      if (f) {
+        form.factoryId = f.id;
+        await Promise.all([loadProducts(f.id), loadProductGroups(f.id)]);
       }
     }
-
-    form.imageUrls = imageUrls;
-    form.rows = rows.length ? rows : [{ ...blankRow("issue"), sourceImageIdx: 0 }];
-    // 选了不止一张图才按"一组一组提交"来；就选了一张图，跟原来一样一次性保存就行
-    isMultiImageBatch.value = files.length > 1;
+    if (r.date && /^\d{4}-\d{2}-\d{2}$/.test(r.date)) form.returnDate = r.date;
+    form.rows = r.items.length
+      ? r.items.map((it) => ({
+          ...blankRow("issue"),
+          materialName: it.materialName,
+          weightJin: it.weightJin,
+          productGroupId: lastIssueProductGroupId.value,
+          sourceImageIdx: 0,
+        }))
+      : [{ ...blankRow("issue"), sourceImageIdx: 0 }];
 
     dialogVisible.value = true;
-    ElMessage.success(
-      files.length > 1
-        ? `${files.length} 张图识别完成，共 ${rows.length} 行，可以逐组提交，不用一次填完`
-        : "识别完成，请核对后保存",
-    );
+    ElMessage.success("识别完成，请核对后保存");
   } finally {
     uploading.value = false;
   }
+}
+
+// 多张图：不再一次性把全部图识别完才打开弹窗（图一多，等全部识别完太慢）——先把原始文件
+// 存起来，弹窗立刻打开显示"校对工作台"总览，点开某一组的"校对"才真正识别那一张
+async function importIssueFilesLazy(files: File[]) {
+  dialogMode.value = "create";
+  editingId.value = null;
+  resetForm();
+  await applyDefaultFactory();
+
+  form.imageUrls = files.map((f) => URL.createObjectURL(f));
+  pendingIssueFiles.value = [...files];
+  form.rows = [];
+  isMultiImageBatch.value = true;
+
+  dialogVisible.value = true;
+  ElMessage.success(`已导入 ${files.length} 张图，点每一行的"校对"再逐张识别，不用等全部识别完才能看`);
 }
 
 // 退货要选好货号、填重量；发料要填物料名称、填重量——两套字段各自的必填条件不一样
@@ -996,7 +1080,11 @@ onMounted(async () => {
                 <template #default="{ row: g }">{{ g.imageIdx != null ? `第 ${g.imageIdx + 1} 张` : "手动新增 / 补录" }}</template>
               </el-table-column>
               <el-table-column label="待处理行数" width="110" align="center">
-                <template #default="{ row: g }">{{ g.rows.length }}</template>
+                <template #default="{ row: g }">
+                  <span v-if="g.imageIdx != null && recognizingImageIdxs.has(g.imageIdx)" class="muted">识别中…</span>
+                  <span v-else-if="g.imageIdx != null && pendingIssueFiles[g.imageIdx]" class="muted">待识别</span>
+                  <span v-else>{{ g.rows.length }}</span>
+                </template>
               </el-table-column>
               <el-table-column label="状态" width="100" align="center">
                 <template #default="{ row: g }">
@@ -1006,7 +1094,7 @@ onMounted(async () => {
               </el-table-column>
               <el-table-column label="操作" width="90" align="center">
                 <template #default="{ row: g }">
-                  <el-button link type="primary" @click="openGroupDetail(groupKey(g))">校对</el-button>
+                  <el-button link type="primary" @click="reviewGroup(groupKey(g))">校对</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -1034,10 +1122,15 @@ onMounted(async () => {
             </div>
             <div v-else-if="renderGroups.length > 1" class="manual-group-label">手动新增（没有对应图片）</div>
 
+            <!-- 多张图导入是点进来才识别那一张，识别没结束之前先显示"识别中"，不然看着像
+                 "这张图什么都没识别出来"的空白编辑区，容易误会 -->
+            <div v-if="g.imageIdx != null && recognizingImageIdxs.has(g.imageIdx)" v-loading="true" class="recognizing-placeholder">
+              正在识别这张图…
+            </div>
             <!-- 退货按货号选（工序，跟入库单一样）；发料是原材料，没有货号，先选这批料是哪个
                  产品用的（选填），物料名称就能从这个产品的物料清单里下拉选，选不到就直接打字，
                  保存时顺手记进这个产品的物料清单，下次就有了 -->
-            <div class="rows-editor">
+            <div v-else class="rows-editor">
               <div class="rows-grid rows-grid--header">
                 <span class="col-label">类型</span>
                 <span class="col-label">产品</span>
@@ -1212,6 +1305,15 @@ onMounted(async () => {
   font-size: 12px;
   color: #909399;
   margin-bottom: 8px;
+}
+
+.recognizing-placeholder {
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #909399;
+  font-size: 13px;
 }
 
 .slip-hint {
