@@ -248,6 +248,17 @@ async function load() {
       // 顺便把认得出来的名称也带出来
       await suggestFactoryFromSkus();
     }
+    // 识别名字、货号反查都没猜出玩具厂，按惯例默认选"美奇"（跟列表页筛选、出库单导入
+    // 同一个习惯）——这家占了入库的大头，不用每次都从"请选择玩具厂"开始手动选，真不是
+    // 美奇的这里改一下就行
+    if (!factoryId.value) {
+      const preferred = factories.value.find((f) => f.name === "美奇");
+      if (preferred) {
+        factoryId.value = preferred.id;
+        await loadProducts();
+        syncItemsFromCatalog();
+      }
+    }
   } finally {
     loading.value = false;
   }
