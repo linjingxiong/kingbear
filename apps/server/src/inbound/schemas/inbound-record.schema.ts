@@ -7,10 +7,14 @@ export class InboundItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', default: null })
   productId: Types.ObjectId | null;
 
-  @Prop({ required: true })
+  // sku/name 识别失败时可能是空字符串——这里不能标 required，不然 OCR 哪一行没识别全就
+  // 整张单据存不进去，直接炸成 500；"必须填"这个要求放在确认页提交时的 DTO 校验
+  // （ConfirmInboundItemDto 的 @IsNotEmpty()）才对，待确认阶段允许空着，让人工在确认页
+  // 看见空白、自己填上，不是数据库层面就拦死
+  @Prop({ default: '' })
   sku: string;
 
-  @Prop({ required: true })
+  @Prop({ default: '' })
   name: string;
 
   /** 重量（斤） */
