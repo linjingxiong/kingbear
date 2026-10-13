@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
   InboundStatus,
+  OUTBOUND_KIND_LABEL,
   type PartyBase,
   type PartyLedgerRow,
   type PartyListItem,
@@ -268,7 +269,7 @@ export class PartyService {
         sourceId: String(r._id),
         date: r.returnDate.toISOString(),
         direction: kind === 'materialReturn' ? 'in' : 'out',
-        typeLabel: kind === 'issue' ? '出库单·发料' : kind === 'materialReturn' ? '出库单·退料' : '出库单·退货',
+        typeLabel: `出库单·${OUTBOUND_KIND_LABEL[kind]}`,
         itemKind: isMaterial ? 'material' : 'product',
         itemKey: isMaterial ? r.materialName || r.name : r.sku,
         itemName: isMaterial ? r.materialName || r.name : r.name,

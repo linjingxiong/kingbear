@@ -5,6 +5,8 @@ import { ElMessage, ElMessageBox, type FormInstance, type UploadRequestOptions }
 import {
   calculateQuantity,
   hasBigQuantityDiff,
+  isPlausibleOcrDate,
+  OUTBOUND_KIND_LABEL,
   type CreateInboundReturnDto,
   type FactoryListItem,
   type InboundReturnListItem,
@@ -55,8 +57,8 @@ const productGroups = ref<ProductGroup[]>([]);
 const list = ref<InboundReturnListItem[]>([]);
 const loading = ref(false);
 
-const KIND_LABEL: Record<OutboundKind, string> = { issue: "发料", return: "退货", materialReturn: "退料" };
 // el-table 插槽里的 row 是 any，直接 KIND_LABEL[row.kind] 过不了类型检查，包一层函数
+const KIND_LABEL = OUTBOUND_KIND_LABEL;
 function kindLabel(kind: OutboundKind) {
   return KIND_LABEL[kind];
 }
@@ -317,17 +319,6 @@ const activeGroup = computed<RenderGroup | undefined>(() =>
 // 不是多图批次：货号明细照常显示 renderGroups 里的全部组（通常也就一组）；
 // 是多图批次：总览列表时这里不显示，点进某一组之后只显示这一组
 const groupsToShow = computed(() => (isMultiImageBatch.value ? (activeGroup.value ? [activeGroup.value] : []) : renderGroups.value));
-
-/** 识别出来的日期格式对（yyyy-MM-dd）不代表年份就靠谱——模型偶尔会把手写的"26"看成
- * "06"这种，格式完全合法但年份差了20年，这种记录混进去了，单据列表按当月筛选根本
- * 看不见，等于平白无故"丢了一条"。年份超出合理范围（比如比今年早5年以上，或者比明年还晚）
- * 就不自动填，留空逼着人工看一眼、手动选对，总比悄悄存错一个年份、事后根本想不到去哪找强 */
-function isPlausibleOcrDate(dateStr: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
-  const year = Number(dateStr.slice(0, 4));
-  const thisYear = new Date().getFullYear();
-  return year >= thisYear - 5 && year <= thisYear + 1;
-}
 
 /** 识别这一张图（下标 imageIdx），识别出来的行打上这张图的 sourceImageIdx、带上这批最近
  * 一次选的产品（跟手动加行、单张图识别是同一个"沿用上次选的产品"的习惯）。识别到玩具厂/

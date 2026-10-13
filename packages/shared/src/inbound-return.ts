@@ -10,6 +10,15 @@
  * 会被误判成退货，跑去扣应收账单、找 sku、算金额 */
 export type OutboundKind = "issue" | "return" | "materialReturn";
 
+/** 前端列表/弹窗里的类型标签（出库单列表、行编辑器的类型下拉），后端 party.service.ts
+ * 拼"出库单·XX"这种更长的流水标签时也从这份取词——同一个 kind 该叫什么中文，
+ * 全系统只在这一处定义，不会出现前后端措辞不一致 */
+export const OUTBOUND_KIND_LABEL: Record<OutboundKind, string> = {
+  issue: "发料",
+  return: "退货",
+  materialReturn: "退料",
+};
+
 /**
  * 出库单的一行明细（历史上这张表最早只存"退货"，集合名/类名沿用 InboundReturn 没改，
  * 数据库里已有的记录一条都不用动——没有 kind 字段的老记录一律当"退货"处理）。

@@ -8,6 +8,7 @@ export * from "./party";
 export * from "./billing";
 export * from "./dashboard";
 export * from "./quantity";
+export * from "./ocr-date";
 export * from "./asset";
 export * from "./asset-type";
 export * from "./oem-factory";
