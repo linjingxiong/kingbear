@@ -17,7 +17,7 @@ export const DIRECTION_LABEL: Record<LedgerDirection, string> = {
 export function sourceRoute(source: LedgerSource): { path: string; query?: Record<string, string> } {
   switch (source) {
     case "inbound":
-      return { path: "/inbound" };
+      return { path: "/inbound", query: { tab: "inbound" } };
     case "outbound_issue":
     case "outbound_return":
     case "outbound_material_return":

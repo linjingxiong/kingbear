@@ -1,44 +1,52 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import InboundListView from "./InboundListView.vue";
-import InboundReturnListView from "../inbound-return/InboundReturnListView.vue";
+import InboundDetailView from "./InboundDetailView.vue";
 import InboundGalleryView from "./InboundGalleryView.vue";
 import InboundCalendarView from "./InboundCalendarView.vue";
 
-// 入库、入库退货、单据相册这几个原来是分散的（或者根本没有），操作/查看流程都是围绕
-// "入库单"这一件事，合并成一个页面用 tab 切换，减少侧边栏入口。各自的组件、接口、
-// 数据结构完全不动，这里只是套一层 tab 壳。tab 状态放进 URL 的 query（而不是纯本地 ref），
-// 这样"退货"/"相册"这些 tab 也能被直接分享/刷新保留在当前位置，不会一刷新就跳回"入库"
+// 日历、明细（入库+出库合并）、单据相册，合成一个页面用 tab 切换，减少侧边栏入口。
+// 原来入库/出库是两个平级 tab，日历排最后——现在反过来：日历是最常用的"按天看情况"
+// 入口，放第一个、也是默认打开的；入库/出库合并成"明细"一个 tab（里面用类型切换），
+// 不用再在两个长得很像的 tab 之间来回点。tab 状态放进 URL 的 query，刷新/分享链接
+// 都能保留在当前位置。
+//
+// 旧链接兼容：以前 ?tab=inbound / ?tab=return 直接对应"入库"/"出库"两个独立 tab，
+// 合并之后这两个旧值都转换成"明细"tab，再用哪个值带出"默认显示入库还是出库"
 const route = useRoute();
 const router = useRouter();
 
-type TabName = "inbound" | "return" | "gallery" | "calendar";
-const VALID_TABS: TabName[] = ["inbound", "return", "gallery", "calendar"];
+type TabName = "calendar" | "detail" | "gallery";
+const VALID_TABS: TabName[] = ["calendar", "detail", "gallery"];
+const LEGACY_DETAIL_KINDS = ["inbound", "return"] as const;
 
-const activeTab = computed({
-  get: () => (VALID_TABS.includes(route.query.tab as TabName) ? (route.query.tab as TabName) : "inbound"),
-  set: (val: TabName) => {
-    router.replace({ path: "/inbound", query: val === "inbound" ? {} : { tab: val } });
+const activeTab = computed<TabName>({
+  get: () => {
+    const raw = route.query.tab as string | undefined;
+    if (!raw) return "calendar";
+    if ((LEGACY_DETAIL_KINDS as readonly string[]).includes(raw)) return "detail";
+    return VALID_TABS.includes(raw as TabName) ? (raw as TabName) : "calendar";
+  },
+  set: (val) => {
+    router.replace({ path: "/inbound", query: val === "calendar" ? {} : { tab: val } });
   },
 });
+
+// "明细"tab 默认显示入库还是出库：旧链接 ?tab=return 过来的就显示出库，其它情况
+// （包括点"明细"tab 本身，name 就是 "detail"）默认显示入库
+const detailKind = computed<"inbound" | "return">(() => (route.query.tab === "return" ? "return" : "inbound"));
 </script>
 
 <template>
   <el-tabs v-model="activeTab" class="hub-tabs">
-    <el-tab-pane label="入库" name="inbound" lazy>
-      <InboundListView />
+    <el-tab-pane label="日历" name="calendar" lazy>
+      <InboundCalendarView />
     </el-tab-pane>
-    <!-- 出库单（发料 + 退货）。tab 的 name 还是 "return"，是为了之前分享/收藏的
-         ?tab=return 链接继续能用，显示的名字改成"出库" -->
-    <el-tab-pane label="出库" name="return" lazy>
-      <InboundReturnListView />
+    <el-tab-pane label="明细" name="detail" lazy>
+      <InboundDetailView :initial-kind="detailKind" />
     </el-tab-pane>
     <el-tab-pane label="单据相册" name="gallery" lazy>
       <InboundGalleryView />
-    </el-tab-pane>
-    <el-tab-pane label="日历" name="calendar" lazy>
-      <InboundCalendarView />
     </el-tab-pane>
   </el-tabs>
 </template>

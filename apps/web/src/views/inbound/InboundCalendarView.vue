@@ -121,7 +121,7 @@ function goInboundEdit(recordId: string) {
 }
 function goInboundTab() {
   detailVisible.value = false;
-  router.push({ path: "/inbound" });
+  router.push({ path: "/inbound", query: { tab: "inbound" } });
 }
 function goOutboundTab() {
   detailVisible.value = false;
