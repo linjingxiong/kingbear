@@ -39,6 +39,10 @@ function dateLabel(iso: string) {
 
 onMounted(async () => {
   factories.value = await listFactories();
+  // 默认优先选"美奇"，列表里没有的话（比如换了环境）就不选，不会白屏选不出来——
+  // 跟系统里其它玩具厂筛选器保持同一个习惯，不想看"美奇"可以自己清空切"全部"
+  const preferred = factories.value.find((f) => f.name === "美奇");
+  if (preferred) factoryId.value = preferred.id;
   load();
 });
 </script>

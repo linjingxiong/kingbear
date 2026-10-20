@@ -83,7 +83,9 @@ const treeData = computed<GroupNode[]>(() => {
 async function loadFactories() {
   factories.value = await listFactories();
   if (!selectedFactoryId.value && factories.value.length) {
-    selectedFactoryId.value = factories.value[0].id;
+    // 默认优先选"美奇"，列表里没有的话（比如换了环境）再退回选第一个，不会白屏选不出来
+    const preferred = factories.value.find((f) => f.name === "美奇");
+    selectedFactoryId.value = (preferred ?? factories.value[0]).id;
   }
 }
 

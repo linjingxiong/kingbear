@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import InboundListView from "./InboundListView.vue";
 import InboundReturnListView from "../inbound-return/InboundReturnListView.vue";
 import InboundGalleryView from "./InboundGalleryView.vue";
+import InboundCalendarView from "./InboundCalendarView.vue";
 
 // 入库、入库退货、单据相册这几个原来是分散的（或者根本没有），操作/查看流程都是围绕
 // "入库单"这一件事，合并成一个页面用 tab 切换，减少侧边栏入口。各自的组件、接口、
@@ -12,8 +13,8 @@ import InboundGalleryView from "./InboundGalleryView.vue";
 const route = useRoute();
 const router = useRouter();
 
-type TabName = "inbound" | "return" | "gallery";
-const VALID_TABS: TabName[] = ["inbound", "return", "gallery"];
+type TabName = "inbound" | "return" | "gallery" | "calendar";
+const VALID_TABS: TabName[] = ["inbound", "return", "gallery", "calendar"];
 
 const activeTab = computed({
   get: () => (VALID_TABS.includes(route.query.tab as TabName) ? (route.query.tab as TabName) : "inbound"),
@@ -35,6 +36,9 @@ const activeTab = computed({
     </el-tab-pane>
     <el-tab-pane label="单据相册" name="gallery" lazy>
       <InboundGalleryView />
+    </el-tab-pane>
+    <el-tab-pane label="日历" name="calendar" lazy>
+      <InboundCalendarView />
     </el-tab-pane>
   </el-tabs>
 </template>
