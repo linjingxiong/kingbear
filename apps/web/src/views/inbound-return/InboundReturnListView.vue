@@ -49,6 +49,10 @@ function resetSlipZoomStates() {
   slipZoomStates.clear();
 }
 
+// 日历那边点了某一天，把这天传进来当日期筛选用（跟自己手动拉日期筛选区间是同一套
+// dateFrom/dateTo，不是另外加一套）；传空字符串就是清掉筛选，回到当月
+const props = defineProps<{ filterDate?: string }>();
+
 const factories = ref<FactoryListItem[]>([]);
 const productsByFactory = ref<Product[]>([]);
 // 发料这批物料是给这个玩具厂哪个产品用的（选填），选了产品，物料名称就能从这个产品的
@@ -66,8 +70,20 @@ function kindLabel(kind: OutboundKind) {
 // 玩具厂默认选"美奇"、日期默认当月，不用每次自己选
 const kindFilter = ref<"" | OutboundKind>("");
 const listFactoryFilter = ref("");
-const dateFrom = ref(dayjs().startOf("month").format("YYYY-MM-DD"));
-const dateTo = ref(dayjs().endOf("month").format("YYYY-MM-DD"));
+const dateFrom = ref(props.filterDate || dayjs().startOf("month").format("YYYY-MM-DD"));
+const dateTo = ref(props.filterDate || dayjs().endOf("month").format("YYYY-MM-DD"));
+watch(
+  () => props.filterDate,
+  (d) => {
+    if (d) {
+      dateFrom.value = d;
+      dateTo.value = d;
+    } else {
+      dateFrom.value = dayjs().startOf("month").format("YYYY-MM-DD");
+      dateTo.value = dayjs().endOf("month").format("YYYY-MM-DD");
+    }
+  },
+);
 const filteredList = computed(() =>
   list.value.filter((r) => {
     if (kindFilter.value && r.kind !== kindFilter.value) return false;

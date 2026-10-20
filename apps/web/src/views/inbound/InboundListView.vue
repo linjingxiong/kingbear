@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import dayjs from "dayjs";
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from "element-plus";
@@ -19,6 +19,10 @@ import { createManualInbound, deleteInbound, searchInbound, uploadInboundImage }
 
 const router = useRouter();
 
+// 日历那边点了某一天，把这天传进来当日期筛选用（跟自己手动拉日期筛选区间是同一套
+// query.dateFrom/dateTo，不是另外加一套）；传空字符串就是清掉筛选，回到当月
+const props = defineProps<{ filterDate?: string }>();
+
 const factories = ref<FactoryListItem[]>([]);
 const products = ref<Product[]>([]); // 当前选中玩具厂下的产品，给"货号"下拉框用
 // 列表接口现在直接按货号拆好行返回（跟表格展示粒度一致），不用再在前端自己 flatMap 一遍
@@ -30,8 +34,8 @@ const uploading = ref(false);
 // 不带 code（入库单号）和 productName（产品名称），这两个筛选项已经去掉了
 const query = reactive<Omit<SearchInboundQuery, "code" | "productName">>({
   factoryId: undefined,
-  dateFrom: dayjs().startOf("month").format("YYYY-MM-DD"),
-  dateTo: dayjs().endOf("month").format("YYYY-MM-DD"),
+  dateFrom: props.filterDate || dayjs().startOf("month").format("YYYY-MM-DD"),
+  dateTo: props.filterDate || dayjs().endOf("month").format("YYYY-MM-DD"),
   sku: undefined,
   amountMin: undefined,
   amountMax: undefined,
@@ -160,6 +164,20 @@ onMounted(async () => {
   await loadProducts();
   load();
 });
+
+watch(
+  () => props.filterDate,
+  (d) => {
+    if (d) {
+      query.dateFrom = d;
+      query.dateTo = d;
+    } else {
+      query.dateFrom = dayjs().startOf("month").format("YYYY-MM-DD");
+      query.dateTo = dayjs().endOf("month").format("YYYY-MM-DD");
+    }
+    handleSearch();
+  },
+);
 </script>
 
 <template>
