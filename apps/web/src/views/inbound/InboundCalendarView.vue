@@ -3,12 +3,17 @@ import { computed, onMounted, ref } from "vue";
 import dayjs from "dayjs";
 import type { FactoryListItem } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
-import { searchInbound } from "../../api/inbound";
+import { searchInbound, getInboundGallery } from "../../api/inbound";
 import { listInboundReturns } from "../../api/inbound-return";
 
 // 日历视图：一眼看出这个月哪几天没录入库/出库单——比翻列表、一行行对日期快得多。
 // 今天之前、选中玩具厂（或全部）那天既没有入库记录也没有出库记录，就标红提醒"可能漏录了"；
 // 今天以及还没到的日子不算"漏录"，正常显示，不然每个月后半段全是红的，没意义。
+//
+// "有入库/有出库"是数据库里有没有这条记录（哪怕是手工录入、没拍照的），"有单据"是单独
+// 一个维度——有没有拍单据原图留底（跟"单据相册"同一个判断口径：没拍照的记录不算）。
+// 一条记录完全可能有记录但没拍照（比如手工补录），所以"有单据"不影响"疑似漏录"的判断，
+// 只是在有记录的格子上再多标一下这天有没有留底照片，方便知道该去补拍哪几天的单据
 const factories = ref<FactoryListItem[]>([]);
 const factoryId = ref("");
 const month = ref(dayjs().format("YYYY-MM"));
@@ -16,6 +21,7 @@ const loading = ref(false);
 
 const inboundDates = ref<Set<string>>(new Set());
 const outboundDates = ref<Set<string>>(new Set());
+const documentDates = ref<Set<string>>(new Set());
 
 const WEEKDAY_NAMES = ["日", "一", "二", "三", "四", "五", "六"];
 const todayStr = dayjs().format("YYYY-MM-DD");
@@ -39,7 +45,8 @@ const calendarCells = computed<CalendarCell[]>(() => {
 function cellStatus(date: string) {
   const hasIn = inboundDates.value.has(date);
   const hasOut = outboundDates.value.has(date);
-  return { hasIn, hasOut, missing: date <= todayStr && !hasIn && !hasOut };
+  const hasDoc = documentDates.value.has(date);
+  return { hasIn, hasOut, hasDoc, missing: date <= todayStr && !hasIn && !hasOut };
 }
 
 function dayNum(date: string) {
@@ -51,9 +58,10 @@ async function load() {
   try {
     const dateFrom = `${month.value}-01`;
     const dateTo = dayjs(dateFrom).endOf("month").format("YYYY-MM-DD");
-    const [inboundResult, outboundList] = await Promise.all([
+    const [inboundResult, outboundList, galleryItems] = await Promise.all([
       searchInbound({ factoryId: factoryId.value || undefined, dateFrom, dateTo, pageSize: 2000 }),
       listInboundReturns(),
+      getInboundGallery({ factoryId: factoryId.value || undefined, yearMonth: month.value }),
     ]);
     inboundDates.value = new Set(inboundResult.list.map((r) => (r.inboundDate ?? "").slice(0, 10)).filter(Boolean));
     outboundDates.value = new Set(
@@ -61,6 +69,7 @@ async function load() {
         .filter((r) => (!factoryId.value || r.factoryId === factoryId.value) && (r.returnDate ?? "").slice(0, 7) === month.value)
         .map((r) => r.returnDate.slice(0, 10)),
     );
+    documentDates.value = new Set(galleryItems.map((g) => (g.inboundDate ?? "").slice(0, 10)).filter(Boolean));
   } finally {
     loading.value = false;
   }
@@ -103,6 +112,7 @@ onMounted(async () => {
       <div class="legend">
         <span class="legend-item"><i class="dot dot-in" />有入库</span>
         <span class="legend-item"><i class="dot dot-out" />有出库</span>
+        <span class="legend-item"><i class="dot dot-doc" />有单据照片</span>
         <span class="legend-item"><i class="dot dot-missing" />疑似漏录</span>
       </div>
     </div>
@@ -120,6 +130,7 @@ onMounted(async () => {
           <div class="day-tags">
             <span v-if="cellStatus(cell.date).hasIn" class="day-tag day-tag--in">入</span>
             <span v-if="cellStatus(cell.date).hasOut" class="day-tag day-tag--out">出</span>
+            <span v-if="cellStatus(cell.date).hasDoc" class="day-tag day-tag--doc">单</span>
           </div>
         </div>
       </template>
@@ -177,6 +188,10 @@ onMounted(async () => {
 
 .dot-out {
   background: #409eff;
+}
+
+.dot-doc {
+  background: #e6a23c;
 }
 
 .dot-missing {
@@ -250,6 +265,10 @@ onMounted(async () => {
 
 .day-tag--out {
   background: #409eff;
+}
+
+.day-tag--doc {
+  background: #e6a23c;
 }
 
 @media (max-width: 640px) {
