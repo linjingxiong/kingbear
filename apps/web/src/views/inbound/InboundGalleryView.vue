@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import dayjs from "dayjs";
 import type { FactoryListItem, GalleryKind, InboundGalleryItem } from "@kingbear/shared";
 import { listFactories } from "../../api/factory";
 import { getInboundGallery } from "../../api/inbound";
+import GalleryThumbGrid from "./GalleryThumbGrid.vue";
 
 const factories = ref<FactoryListItem[]>([]);
 const factoryId = ref<string>("");
+
+// 平铺视图：按条件筛，结果铺成一个网格；文件夹视图：按月份分文件夹，点进某个月
+// 再看这个月的入库/出库照片——两种看法互不影响，筛选条件（玩具厂）两边共用
+const viewMode = ref<"flat" | "folder">("flat");
+
 // 账期下拉：最近12个月 + "全部"，"全部"就是空字符串不传 yearMonth，跟应收账单那个选择器同一个思路
 const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
 const yearMonth = ref<string>("");
@@ -16,11 +22,7 @@ const kind = ref<"" | GalleryKind>("");
 const list = ref<InboundGalleryItem[]>([]);
 const loading = ref(false);
 
-// 相册预览用：当前筛选结果里所有图片的 URL，点开任意一张都能在同一批里左右翻页看，
-// 不用退出来重新点下一张
-const previewList = computed(() => list.value.map((item) => item.imageUrl));
-
-async function load() {
+async function loadFlat() {
   loading.value = true;
   try {
     list.value = await getInboundGallery({
@@ -33,9 +35,61 @@ async function load() {
   }
 }
 
-function dateLabel(iso: string) {
-  return dayjs(iso).format("YYYY-MM-DD");
+// 文件夹视图要按月份分组，所以拉的是这个玩具厂下"全部月份、全部种类"的照片，
+// 分组、按入库/出库拆开都在前端做，不用再求后端加一个"按月分组"的接口
+const folderAll = ref<InboundGalleryItem[]>([]);
+const folderLoading = ref(false);
+const openedMonth = ref("");
+
+async function loadFolderAll() {
+  folderLoading.value = true;
+  try {
+    folderAll.value = await getInboundGallery({ factoryId: factoryId.value || undefined });
+  } finally {
+    folderLoading.value = false;
+  }
 }
+
+type MonthFolder = { month: string; inboundCount: number; outboundCount: number; total: number };
+
+const folders = computed<MonthFolder[]>(() => {
+  const map = new Map<string, { inbound: number; outbound: number }>();
+  for (const item of folderAll.value) {
+    const m = dayjs(item.inboundDate).format("YYYY-MM");
+    const entry = map.get(m) ?? { inbound: 0, outbound: 0 };
+    if (item.kind === "inbound") entry.inbound++;
+    else entry.outbound++;
+    map.set(m, entry);
+  }
+  return Array.from(map.entries())
+    .map(([month, c]) => ({ month, inboundCount: c.inbound, outboundCount: c.outbound, total: c.inbound + c.outbound }))
+    .sort((a, b) => (a.month < b.month ? 1 : -1));
+});
+
+const openedMonthInbound = computed(() =>
+  folderAll.value.filter((i) => i.kind === "inbound" && dayjs(i.inboundDate).format("YYYY-MM") === openedMonth.value),
+);
+const openedMonthOutbound = computed(() =>
+  folderAll.value.filter((i) => i.kind === "outbound" && dayjs(i.inboundDate).format("YYYY-MM") === openedMonth.value),
+);
+
+function openFolder(month: string) {
+  openedMonth.value = month;
+}
+function backToFolders() {
+  openedMonth.value = "";
+}
+
+function onFactoryChange() {
+  openedMonth.value = "";
+  if (viewMode.value === "flat") loadFlat();
+  else loadFolderAll();
+}
+
+watch(viewMode, (mode) => {
+  openedMonth.value = "";
+  if (mode === "folder" && !folderAll.value.length) loadFolderAll();
+});
 
 onMounted(async () => {
   factories.value = await listFactories();
@@ -43,51 +97,73 @@ onMounted(async () => {
   // 跟系统里其它玩具厂筛选器保持同一个习惯，不想看"美奇"可以自己清空切"全部"
   const preferred = factories.value.find((f) => f.name === "美奇");
   if (preferred) factoryId.value = preferred.id;
-  load();
+  loadFlat();
 });
 </script>
 
 <template>
   <div class="gallery-page">
     <div class="filter-bar">
-      <el-select v-model="factoryId" placeholder="全部玩具厂" clearable filterable style="width: 200px" @change="load">
+      <el-select v-model="factoryId" placeholder="全部玩具厂" clearable filterable style="width: 200px" @change="onFactoryChange">
         <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
       </el-select>
-      <el-select v-model="yearMonth" placeholder="全部时间" clearable style="width: 160px" @change="load">
-        <el-option v-for="m in monthOptions" :key="m" :label="m" :value="m" />
-      </el-select>
-      <el-radio-group v-model="kind" @change="load">
-        <el-radio-button value="">全部单据</el-radio-button>
-        <el-radio-button value="inbound">入库单</el-radio-button>
-        <el-radio-button value="outbound">出库单</el-radio-button>
+
+      <el-radio-group v-model="viewMode" class="mode-switch">
+        <el-radio-button value="flat">平铺</el-radio-button>
+        <el-radio-button value="folder">按月份文件夹</el-radio-button>
       </el-radio-group>
-      <span class="filter-count" v-if="!loading">共 {{ list.length }} 张</span>
+
+      <template v-if="viewMode === 'flat'">
+        <el-select v-model="yearMonth" placeholder="全部时间" clearable style="width: 160px" @change="loadFlat">
+          <el-option v-for="m in monthOptions" :key="m" :label="m" :value="m" />
+        </el-select>
+        <el-radio-group v-model="kind" @change="loadFlat">
+          <el-radio-button value="">全部单据</el-radio-button>
+          <el-radio-button value="inbound">入库单</el-radio-button>
+          <el-radio-button value="outbound">出库单</el-radio-button>
+        </el-radio-group>
+        <span class="filter-count" v-if="!loading">共 {{ list.length }} 张</span>
+      </template>
     </div>
 
-    <div v-loading="loading" class="gallery-grid">
-      <div v-for="(item, idx) in list" :key="`${item.kind}:${item.recordId}`" class="gallery-card">
-        <el-image
-          :src="item.imageUrl"
-          :preview-src-list="previewList" hide-on-click-modal
-          :initial-index="idx"
-          preview-teleported
-          fit="cover"
-          class="gallery-thumb"
-          :style="{ transform: `rotate(${item.rotation}deg)` }"
-          lazy
-        />
-        <div class="gallery-caption">
-          <div class="gallery-caption-main">
-            {{ item.factoryName }}
-            <el-tag :type="item.kind === 'inbound' ? 'success' : 'primary'" size="small" effect="plain" class="gallery-kind-tag">
-              {{ item.kind === "inbound" ? "入库" : "出库" }}
-            </el-tag>
-          </div>
-          <div class="gallery-caption-sub">{{ dateLabel(item.inboundDate) }}</div>
-        </div>
-      </div>
+    <div v-if="viewMode === 'flat'" v-loading="loading">
+      <GalleryThumbGrid :items="list" />
     </div>
-    <el-empty v-if="!loading && !list.length" description="没有符合条件的单据照片" />
+
+    <div v-else v-loading="folderLoading">
+      <template v-if="!openedMonth">
+        <div class="folder-grid">
+          <div v-for="f in folders" :key="f.month" class="folder-card" @click="openFolder(f.month)">
+            <el-icon class="folder-icon"><Folder /></el-icon>
+            <div class="folder-month">{{ f.month }}</div>
+            <div class="folder-counts">
+              <span class="folder-count folder-count--in">入 {{ f.inboundCount }}</span>
+              <span class="folder-count folder-count--out">出 {{ f.outboundCount }}</span>
+            </div>
+          </div>
+        </div>
+        <el-empty v-if="!folderLoading && !folders.length" description="没有单据照片" />
+      </template>
+
+      <template v-else>
+        <div class="folder-breadcrumb">
+          <el-button size="small" text type="primary" @click="backToFolders">
+            <el-icon><ArrowLeft /></el-icon>
+            返回文件夹
+          </el-button>
+          <span class="folder-breadcrumb-label">{{ openedMonth }}</span>
+        </div>
+
+        <div class="folder-section">
+          <div class="folder-section-title">入库单（{{ openedMonthInbound.length }}）</div>
+          <GalleryThumbGrid :items="openedMonthInbound" empty-text="这个月没有入库单照片" />
+        </div>
+        <div class="folder-section">
+          <div class="folder-section-title">出库单（{{ openedMonthOutbound.length }}）</div>
+          <GalleryThumbGrid :items="openedMonthOutbound" empty-text="这个月没有出库单照片" />
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -100,57 +176,83 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.mode-switch {
+  margin-left: 4px;
+}
+
 .filter-count {
   color: #909399;
   font-size: 13px;
 }
 
-/* 像图片文件夹一样铺开：固定尺寸的方形缩略图自动换行，每张图配一小行说明文字 */
-.gallery-grid {
+.folder-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 16px;
-  min-height: 120px;
 }
 
-.gallery-card {
+.folder-card {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
+  padding: 20px 10px;
+  border-radius: 8px;
+  background: #f8f9fb;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.gallery-thumb {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 6px;
-  cursor: zoom-in;
-  background: #f5f7fa;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+.folder-card:hover {
+  background: #eef3fb;
 }
 
-.gallery-caption {
-  font-size: 12px;
-  line-height: 1.4;
-  overflow: hidden;
+.folder-icon {
+  font-size: 36px;
+  color: #e6a23c;
 }
 
-.gallery-caption-main {
+.folder-month {
+  font-size: 14px;
   font-weight: 600;
   color: #303133;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.gallery-kind-tag {
-  margin-left: 4px;
-  vertical-align: 1px;
+.folder-counts {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
 }
 
-.gallery-caption-sub {
-  color: #909399;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.folder-count--in {
+  color: #67c23a;
+}
+
+.folder-count--out {
+  color: #409eff;
+}
+
+.folder-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.folder-breadcrumb-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.folder-section {
+  margin-bottom: 24px;
+}
+
+.folder-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #606266;
+  margin-bottom: 10px;
 }
 </style>
