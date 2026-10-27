@@ -11,7 +11,7 @@ const factoryId = ref<string>("");
 
 // 平铺视图：按条件筛，结果铺成一个网格；文件夹视图：按月份分文件夹，点进某个月
 // 再看这个月的入库/出库照片——两种看法互不影响，筛选条件（玩具厂）两边共用
-const viewMode = ref<"flat" | "folder">("flat");
+const viewMode = ref<"flat" | "folder">("folder");
 
 // 账期下拉：最近12个月 + "全部"，"全部"就是空字符串不传 yearMonth，跟应收账单那个选择器同一个思路
 const monthOptions = Array.from({ length: 12 }, (_, i) => dayjs().subtract(i, "month").format("YYYY-MM"));
@@ -21,6 +21,7 @@ const kind = ref<"" | GalleryKind>("");
 
 const list = ref<InboundGalleryItem[]>([]);
 const loading = ref(false);
+const flatLoaded = ref(false);
 
 async function loadFlat() {
   loading.value = true;
@@ -30,6 +31,7 @@ async function loadFlat() {
       yearMonth: yearMonth.value || undefined,
       kind: kind.value || undefined,
     });
+    flatLoaded.value = true;
   } finally {
     loading.value = false;
   }
@@ -39,12 +41,14 @@ async function loadFlat() {
 // 分组、按入库/出库拆开都在前端做，不用再求后端加一个"按月分组"的接口
 const folderAll = ref<InboundGalleryItem[]>([]);
 const folderLoading = ref(false);
+const folderLoaded = ref(false);
 const openedMonth = ref("");
 
 async function loadFolderAll() {
   folderLoading.value = true;
   try {
     folderAll.value = await getInboundGallery({ factoryId: factoryId.value || undefined });
+    folderLoaded.value = true;
   } finally {
     folderLoading.value = false;
   }
@@ -82,13 +86,18 @@ function backToFolders() {
 
 function onFactoryChange() {
   openedMonth.value = "";
+  // 换了玩具厂，两边缓存的数据都跟新选的厂对不上了，标记成"没加载过"，
+  // 当前这个视图立刻重新拉，另一个视图等真的切过去的时候再拉
+  flatLoaded.value = false;
+  folderLoaded.value = false;
   if (viewMode.value === "flat") loadFlat();
   else loadFolderAll();
 }
 
 watch(viewMode, (mode) => {
   openedMonth.value = "";
-  if (mode === "folder" && !folderAll.value.length) loadFolderAll();
+  if (mode === "folder" && !folderLoaded.value) loadFolderAll();
+  if (mode === "flat" && !flatLoaded.value) loadFlat();
 });
 
 onMounted(async () => {
@@ -97,7 +106,8 @@ onMounted(async () => {
   // 跟系统里其它玩具厂筛选器保持同一个习惯，不想看"美奇"可以自己清空切"全部"
   const preferred = factories.value.find((f) => f.name === "美奇");
   if (preferred) factoryId.value = preferred.id;
-  loadFlat();
+  if (viewMode.value === "folder") loadFolderAll();
+  else loadFlat();
 });
 </script>
 
