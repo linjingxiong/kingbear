@@ -214,10 +214,13 @@ type RowItem = {
   /** 这一行是从 form.imageUrls 里第几张图识别出来的；手动加的行（没有对应图片）是 null。
    * 只用来在界面上把"这张图识别出来的行"跟这张图摆在一起显示，提交时也决定这一行该挂哪张图 */
   sourceImageIdx: number | null;
+  /** 这一行自己的出库日期——多图批次里不同张单子经常是不同天，不能整张表单共用一个日期。
+   * 单张图/手动/编辑这几个只有一张单子的场景留空就行，提交时会自动落回 form.returnDate */
+  returnDate: string;
 };
 
 // 新增一行默认"发料"：出库单里大部分是发料、偶尔夹几行退货，退货的那几行手动改一下
-function blankRow(kind: OutboundKind = "issue"): RowItem {
+function blankRow(kind: OutboundKind = "issue", returnDate = ""): RowItem {
   return {
     kind,
     productId: "",
@@ -229,6 +232,7 @@ function blankRow(kind: OutboundKind = "issue"): RowItem {
     reason: "",
     ocrName: "",
     sourceImageIdx: null,
+    returnDate,
   };
 }
 
@@ -349,9 +353,19 @@ const activeGroup = computed<RenderGroup | undefined>(() =>
 // 是多图批次：总览列表时这里不显示，点进某一组之后只显示这一组
 const groupsToShow = computed(() => (isMultiImageBatch.value ? (activeGroup.value ? [activeGroup.value] : []) : renderGroups.value));
 
-/** 识别这一张图（下标 imageIdx），识别出来的行打上这张图的 sourceImageIdx。识别到玩具厂/
- * 日期这两项只在当前还没填的时候才顺手填上，不会覆盖掉已经选好的（多张图是一张一张分开
- * 识别的，不能像以前"只认第一张"那样简单处理，后识别的几张就不要瞎改已经定下来的玩具厂了 */
+// 正在校对的这一组，自己的出库日期——多图批次里每张单子的日期各自独立，这里读/改的是
+// 这一组全部行共用的那个日期（一张单子理应就是一天），不是表单顶部那个全局日期
+const activeGroupDate = computed<string>({
+  get: () => activeGroup.value?.rows[0]?.row.returnDate ?? "",
+  set: (v) => {
+    if (!activeGroup.value) return;
+    for (const { row } of activeGroup.value.rows) row.returnDate = v;
+  },
+});
+
+/** 识别这一张图（下标 imageIdx），识别出来的行打上这张图的 sourceImageIdx。识别到玩具厂
+ * 只在当前还没填的时候才顺手填上，不会覆盖掉已经选好的（多张图是一张一张分开识别的，
+ * 不能像以前"只认第一张"那样简单处理，后识别的几张就不要瞎改已经定下来的玩具厂了 */
 /** 这张图在导入的时候已经传到服务器了（见 importIssueFilesLazy），这里直接按 url 识别，
  * 不用再重新上传一遍文件——也因为这样，不管关没关过浏览器、刷没刷新过页面，这张图都还在
  * 服务器上，随时能点"校对"识别，不存在"原始文件丢了没法识别"这回事 */
@@ -365,10 +379,12 @@ async function recognizeGroupImage(imageIdx: number) {
   lastIssueProductGroupId.value = "";
   try {
     const r = await recognizeOutboundIssueByUrl(form.imageUrls[imageIdx]);
-    if (!form.returnDate && r.date && isPlausibleOcrDate(r.date)) form.returnDate = r.date;
+    // 这张单子自己识别出来的日期，只归这张单子自己的行用——不跟其它张共用一个日期，
+    // 识别不出来就留空，让人工在这一组自己的日期框里填，不会悄悄带上别的单子的日期
+    const sheetDate = r.date && isPlausibleOcrDate(r.date) ? r.date : "";
     for (const it of r.items) {
       form.rows.push({
-        ...blankRow("issue"),
+        ...blankRow("issue", sheetDate),
         materialName: it.materialName,
         weightJin: it.weightJin,
         productGroupId: lastIssueProductGroupId.value,
@@ -422,7 +438,9 @@ async function submitGroupRows(group: RenderGroup): Promise<boolean> {
         kind: row.kind,
         factoryId: form.factoryId,
         ...buildRowFields(row),
-        returnDate: form.returnDate,
+        // 优先用这一行自己的日期（多图批次，每张单子自己的日期）；单张图/手动新增这些
+        // 行没有自己的日期，落回表单顶部那个全局日期
+        returnDate: row.returnDate || form.returnDate,
         reason: row.reason,
         remark: form.remark,
         images,
@@ -676,8 +694,15 @@ function resetForm() {
 // sourceImageIdx 不传就是手动新增（没有对应的图）；传了就加到那张图的分组里，
 // 比如识别完觉得某张图还漏了一行，在那张图自己的"+ 添加一行"里补
 function addRow(sourceImageIdx: number | null = null) {
-  // 新增的行直接带上这批最近选的产品，省得同一个产品每行都要重选一遍
-  form.rows.push({ ...blankRow(), productGroupId: lastIssueProductGroupId.value, sourceImageIdx });
+  // 新增的行直接带上这批最近选的产品，省得同一个产品每行都要重选一遍；日期跟同一组里
+  // 已有的行对齐（同一张单子理应是同一天），这一组还没有别的行就落回全局默认日期
+  const siblingDate = form.rows.find((r) => r.sourceImageIdx === sourceImageIdx)?.returnDate;
+  form.rows.push({
+    ...blankRow(),
+    productGroupId: lastIssueProductGroupId.value,
+    sourceImageIdx,
+    returnDate: siblingDate || form.returnDate,
+  });
 }
 function removeRow(i: number) {
   form.rows.splice(i, 1);
@@ -722,6 +747,9 @@ async function openEdit(row: InboundReturnListItem) {
         ocrName: "",
         // 编辑时只有一行，有图就归到第一张图那组，方便对着图核对，没图就是手动那组
         sourceImageIdx: row.images?.length ? 0 : null,
+        // 编辑走的是 form.returnDate 那条全局日期（见上面 Object.assign 里的 returnDate），
+        // 这一行自己的日期留空就行
+        returnDate: "",
       },
     ],
   });
@@ -893,8 +921,10 @@ async function importIssueFilesLazy(files: File[]) {
   }
 }
 
-// 退货要选好货号、填重量；发料要填物料名称、填重量——两套字段各自的必填条件不一样
+// 退货要选好货号、填重量；发料要填物料名称、填重量——两套字段各自的必填条件不一样；
+// 日期两种都要有（这一行自己的，或者没有就落回表单顶部那个全局日期）
 function rowIsValid(r: RowItem) {
+  if (!r.returnDate && !form.returnDate) return false;
   return r.kind === "return" ? !!r.productId && r.weightJin > 0 : !!r.materialName.trim() && r.weightJin > 0;
 }
 
@@ -1128,8 +1158,14 @@ onMounted(async () => {
             <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="出库日期" prop="returnDate">
+        <!-- 单张图/手动新增/编辑这几种只有一张单子，整张表单共用这一个日期就够了 -->
+        <el-form-item v-if="!isMultiImageBatch" label="出库日期" prop="returnDate">
           <el-date-picker v-model="form.returnDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
+        </el-form-item>
+        <!-- 多图批次：正在校对哪一组，这里改的就是哪一组自己的日期（不同单子经常不是同一天），
+             不是表单顶部那个全局日期——总览列表那一步（还没点进具体某一组）不显示这个 -->
+        <el-form-item v-else-if="activeGroup" label="这张单子日期">
+          <el-date-picker v-model="activeGroupDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" />
         </el-form-item>
         <el-form-item label-width="0">
           <!-- 识别结果不能混在一起摊成一张大表：按"这一行是哪张图识别出来的"分组，一组一组摆，
