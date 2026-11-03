@@ -611,6 +611,12 @@ async function discardDraft() {
 }
 
 watch(form, saveDraft, { deep: true });
+// completedGroupKeys（哪几张图已经点过"校对完成"）单独存一份、不在 form 里，之前没被
+// 监听到——校对完一组时，这个 Set 更新跟 form.rows 删行是分开两步，只监听 form 的话，
+// Vue 的 watcher 是批量/延迟触发的，很容易在"这一组的行已经从 form.rows 摘掉了，但
+// completedGroupKeys 还没来得及 add"这个空档存一次草稿，草稿里这一组就永远留在"未校对"。
+// 这里把它也纳入监听，状态一变就补存一次，不靠那个空档赌时机
+watch(completedGroupKeys, saveDraft, { deep: true });
 // 图片换了（新建/识别/编辑/恢复草稿）就把缩放平移状态清掉，不然带着上一张图的缩放状态显示新图；
 // 新导入一批图，也把"当前第几组"归零，不要停在上一批导入时的进度上
 watch(
