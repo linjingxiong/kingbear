@@ -453,14 +453,21 @@ async function submitCurrentGroup() {
   ElMessage.success(remaining === 0 ? "全部校对完成，可以点下面「关闭」了" : `已保存，返回列表（还剩 ${remaining} 张未校对）`);
 }
 
-// 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串。只改这一行自己——
-// 以前会联动把同一张图里其它还没手动选过的行也一起带过去，但一张出库单上经常是很多
-// 不同的部件/工序（后头、底座、后身……各不一样），联动反而把别的行的选择顶掉了，去掉
+// 换了产品，原来选的物料名称可能不属于新产品的物料清单，清掉避免记串
 function onRowProductGroupChange(row: RowItem) {
   row.materialName = "";
-  // 记住这次选的，后面新增的行、新识别出来的组直接带上这个当默认值，省得每行都重选一遍——
-  // 只是个默认值，不会回头去改已经存在的其它行
+  // 记住这次选的，后面新增的行、新识别出来的组直接带上这个当默认值，省得每行都重选一遍
   lastIssueProductGroupId.value = row.productGroupId;
+  // 只往下带，不往上改：同一张图里，这一行下面"还没选过产品"的行默认跟着这次选的走——
+  // 一张单经常是连续好几行都是同一个产品，这样不用每行都重选；已经选过的行（不管在上面
+  // 还是下面）都不碰，避免把别人已经选好的覆盖掉；上面的行无论如何都不会被这里改到
+  const idx = form.rows.indexOf(row);
+  if (idx === -1) return;
+  for (let i = idx + 1; i < form.rows.length; i++) {
+    const r = form.rows[i];
+    if (r.kind === "return" || r.sourceImageIdx !== row.sourceImageIdx || r.productGroupId) continue;
+    r.productGroupId = row.productGroupId;
+  }
 }
 
 function qtyCalculated(row: RowItem) {
