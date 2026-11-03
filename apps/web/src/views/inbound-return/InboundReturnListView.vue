@@ -349,8 +349,7 @@ const activeGroup = computed<RenderGroup | undefined>(() =>
 // 是多图批次：总览列表时这里不显示，点进某一组之后只显示这一组
 const groupsToShow = computed(() => (isMultiImageBatch.value ? (activeGroup.value ? [activeGroup.value] : []) : renderGroups.value));
 
-/** 识别这一张图（下标 imageIdx），识别出来的行打上这张图的 sourceImageIdx、带上这批最近
- * 一次选的产品（跟手动加行、单张图识别是同一个"沿用上次选的产品"的习惯）。识别到玩具厂/
+/** 识别这一张图（下标 imageIdx），识别出来的行打上这张图的 sourceImageIdx。识别到玩具厂/
  * 日期这两项只在当前还没填的时候才顺手填上，不会覆盖掉已经选好的（多张图是一张一张分开
  * 识别的，不能像以前"只认第一张"那样简单处理，后识别的几张就不要瞎改已经定下来的玩具厂了 */
 /** 这张图在导入的时候已经传到服务器了（见 importIssueFilesLazy），这里直接按 url 识别，
@@ -360,6 +359,10 @@ async function recognizeGroupImage(imageIdx: number) {
   if (recognizingImageIdxs.value.has(imageIdx)) return;
   recognizingImageIdxs.value.add(imageIdx);
   recognizedOnceIdxs.value.add(imageIdx);
+  // "上一次手动选的产品"只在同一张单子里往下带，换到一张新的单子（这张图是第一次识别）
+  // 要清空重新开始——不然上一张单子选的产品会原样带到这张新单子识别出来的行上，两张单子
+  // 经常不是同一个产品，带过来反而是错的
+  lastIssueProductGroupId.value = "";
   try {
     const r = await recognizeOutboundIssueByUrl(form.imageUrls[imageIdx]);
     if (!form.returnDate && r.date && isPlausibleOcrDate(r.date)) form.returnDate = r.date;
