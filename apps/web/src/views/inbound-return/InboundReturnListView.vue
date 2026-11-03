@@ -67,11 +67,29 @@ function kindLabel(kind: OutboundKind) {
   return KIND_LABEL[kind];
 }
 // 列表上方的筛选：类型（空字符串=全部）、玩具厂、出库日期区间——跟入库单列表同一套筛选，
-// 玩具厂默认选"美奇"、日期默认当月，不用每次自己选
+// 玩具厂默认选"美奇"、日期手动选过的记下来（存本地），刷新页面还在，不用每次重选；
+// 没手动选过、也没从日历点进来，才兜底用当月
+const DATE_RANGE_KEY = "kingbear-outbound-list-date-range";
+function loadSavedDateRange(): { from: string; to: string } | null {
+  try {
+    const raw = localStorage.getItem(DATE_RANGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function saveDateRange() {
+  try {
+    localStorage.setItem(DATE_RANGE_KEY, JSON.stringify({ from: dateFrom.value, to: dateTo.value }));
+  } catch {
+    /* ignore */
+  }
+}
+const savedDateRange = loadSavedDateRange();
 const kindFilter = ref<"" | OutboundKind>("");
 const listFactoryFilter = ref("");
-const dateFrom = ref(props.filterDate || dayjs().startOf("month").format("YYYY-MM-DD"));
-const dateTo = ref(props.filterDate || dayjs().endOf("month").format("YYYY-MM-DD"));
+const dateFrom = ref(props.filterDate || savedDateRange?.from || dayjs().startOf("month").format("YYYY-MM-DD"));
+const dateTo = ref(props.filterDate || savedDateRange?.to || dayjs().endOf("month").format("YYYY-MM-DD"));
 watch(
   () => props.filterDate,
   (d) => {
@@ -79,8 +97,8 @@ watch(
       dateFrom.value = d;
       dateTo.value = d;
     } else {
-      dateFrom.value = dayjs().startOf("month").format("YYYY-MM-DD");
-      dateTo.value = dayjs().endOf("month").format("YYYY-MM-DD");
+      dateFrom.value = savedDateRange?.from ?? dayjs().startOf("month").format("YYYY-MM-DD");
+      dateTo.value = savedDateRange?.to ?? dayjs().endOf("month").format("YYYY-MM-DD");
     }
   },
 );
@@ -1006,9 +1024,9 @@ onMounted(async () => {
       <el-select v-model="listFactoryFilter" clearable filterable placeholder="全部玩具厂" style="width: 180px">
         <el-option v-for="f in factories" :key="f.id" :label="f.name" :value="f.id" />
       </el-select>
-      <el-date-picker v-model="dateFrom" type="date" placeholder="起" value-format="YYYY-MM-DD" style="width: 140px" />
+      <el-date-picker v-model="dateFrom" type="date" placeholder="起" value-format="YYYY-MM-DD" style="width: 140px" @change="saveDateRange" />
       <span class="filter-sep">至</span>
-      <el-date-picker v-model="dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" />
+      <el-date-picker v-model="dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" @change="saveDateRange" />
     </div>
 
     <el-alert v-if="draftAvailable" type="warning" :closable="false" show-icon style="margin-bottom: 12px">

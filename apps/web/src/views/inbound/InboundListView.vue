@@ -31,11 +31,32 @@ const total = ref(0);
 const loading = ref(false);
 const uploading = ref(false);
 
+// 日期区间手动选过的记下来（存本地），刷新页面还在，不用每次重选；没手动选过、也没从
+// 日历点进来，才兜底用当月
+const DATE_RANGE_KEY = "kingbear-inbound-list-date-range";
+function loadSavedDateRange(): { from: string; to: string } | null {
+  try {
+    const raw = localStorage.getItem(DATE_RANGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function saveDateRange() {
+  try {
+    localStorage.setItem(DATE_RANGE_KEY, JSON.stringify({ from: query.dateFrom, to: query.dateTo }));
+  } catch {
+    /* ignore */
+  }
+  handleSearch();
+}
+const savedDateRange = loadSavedDateRange();
+
 // 不带 code（入库单号）和 productName（产品名称），这两个筛选项已经去掉了
 const query = reactive<Omit<SearchInboundQuery, "code" | "productName">>({
   factoryId: undefined,
-  dateFrom: props.filterDate || dayjs().startOf("month").format("YYYY-MM-DD"),
-  dateTo: props.filterDate || dayjs().endOf("month").format("YYYY-MM-DD"),
+  dateFrom: props.filterDate || savedDateRange?.from || dayjs().startOf("month").format("YYYY-MM-DD"),
+  dateTo: props.filterDate || savedDateRange?.to || dayjs().endOf("month").format("YYYY-MM-DD"),
   sku: undefined,
   amountMin: undefined,
   amountMax: undefined,
@@ -172,8 +193,8 @@ watch(
       query.dateFrom = d;
       query.dateTo = d;
     } else {
-      query.dateFrom = dayjs().startOf("month").format("YYYY-MM-DD");
-      query.dateTo = dayjs().endOf("month").format("YYYY-MM-DD");
+      query.dateFrom = savedDateRange?.from ?? dayjs().startOf("month").format("YYYY-MM-DD");
+      query.dateTo = savedDateRange?.to ?? dayjs().endOf("month").format("YYYY-MM-DD");
     }
     handleSearch();
   },
@@ -191,10 +212,10 @@ watch(
           </el-select>
         </el-form-item>
         <el-form-item label="日期">
-          <el-date-picker v-model="query.dateFrom" type="date" placeholder="起" value-format="YYYY-MM-DD" style="width: 140px" @change="handleSearch" />
+          <el-date-picker v-model="query.dateFrom" type="date" placeholder="起" value-format="YYYY-MM-DD" style="width: 140px" @change="saveDateRange" />
         </el-form-item>
         <el-form-item label="至">
-          <el-date-picker v-model="query.dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" @change="handleSearch" />
+          <el-date-picker v-model="query.dateTo" type="date" placeholder="止" value-format="YYYY-MM-DD" style="width: 140px" @change="saveDateRange" />
         </el-form-item>
         <el-form-item label="货号">
           <el-select v-model="query.sku" clearable filterable placeholder="全部" style="width: 140px" @change="handleSearch">
