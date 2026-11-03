@@ -578,7 +578,9 @@ async function restoreDraft() {
     const d = JSON.parse(raw);
     dialogMode.value = "create";
     editingId.value = null;
-    if (d.factoryId) await loadProducts(d.factoryId);
+    // 发料/退料那一行的"产品"下拉读的是 productGroups，不是 productsByFactory——漏拉这个
+    // 就会出现"玩具厂已经选好了，产品下拉却是无数据"，得重新点一遍玩具厂才会刷出来
+    if (d.factoryId) await Promise.all([loadProducts(d.factoryId), loadProductGroups(d.factoryId)]);
     recognizingImageIdxs.value = new Set();
     recognizedOnceIdxs.value = new Set();
     // 图片现在导入的时候就直接传到服务器了（不是本地临时预览），存的是真实 URL，
