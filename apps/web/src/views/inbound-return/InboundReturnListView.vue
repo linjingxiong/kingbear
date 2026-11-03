@@ -966,7 +966,10 @@ async function handleSubmit() {
   }
 
   ElMessage.success("保存成功");
-  clearDraft();
+  // 只有"新建"（单张图识别/手动新增）才清草稿——那才是这个草稿真正对应的流程。
+  // "编辑"是改一条已经存在的、跟当前草稿完全无关的旧记录（比如校对多图导入时碰到"疑似
+  // 重复"退出来，跑去编辑那条冲突的旧记录），保存这条编辑不该把还没录完的导入草稿也清掉
+  if (dialogMode.value === "create") clearDraft();
   dialogVisible.value = false;
   load();
 }
