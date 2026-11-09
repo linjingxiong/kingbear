@@ -75,16 +75,21 @@ async function load() {
   }
 }
 
+// 翻月之后旧的"只看某天"筛选还留着会很坑：日历换到了别的月份，但右边明细却还在按
+// 上个月那天筛，看着跟这个月对不上号，容易让人以为"这天的数据丢了"——翻页就清掉选中日期
 function prevMonth() {
   month.value = dayjs(`${month.value}-01`).subtract(1, "month").format("YYYY-MM");
+  if (props.selectedDate) emit("select-date", props.selectedDate);
   load();
 }
 function nextMonth() {
   month.value = dayjs(`${month.value}-01`).add(1, "month").format("YYYY-MM");
+  if (props.selectedDate) emit("select-date", props.selectedDate);
   load();
 }
 function backToday() {
   month.value = dayjs().format("YYYY-MM");
+  if (props.selectedDate) emit("select-date", props.selectedDate);
   load();
 }
 
